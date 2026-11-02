@@ -1,0 +1,38 @@
+# Maintainer: Fuwia <byfuria93@gmail.com>
+pkgname=goley-revival-linux
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Goley Revival için doğal GTK4 + Libadwaita Linux başlatıcısı (ECDSA ncrypt köprüsü ve gizli arka plan modu dahil)"
+arch=('x86_64')
+url="https://github.com/Fuwia/goley-revival-linux"
+license=('GPL-3.0-or-later')
+depends=('gtk4' 'libadwaita' 'gcc-libs' 'glibc')
+makedepends=('cargo' 'mingw-w64-gcc' 'pkgconf')
+optdepends=(
+  'umu-launcher: Proton-GE ile en yüksek oyun uyumluluğu için (önerilen)'
+  'wine: Alternatif uyumluluk katmanı'
+  'winetricks: Tek tıkla NVIDIA PhysX kurulumu için'
+  'gamemode: Feral GameMode performans optimizasyonu için'
+  'mangohud: Oyun içi FPS ve donanım göstergesi için'
+  'gamescope: Wayland mikro-kompozitör desteği için'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release || cargo build --release
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 "target/release/goley-revival-linux" "$pkgdir/usr/bin/goley-revival-linux"
+  install -Dm644 "assets/io.github.fuwia.GoleyRevivalLinux.desktop" \
+    "$pkgdir/usr/share/applications/io.github.fuwia.GoleyRevivalLinux.desktop"
+  install -Dm644 "assets/io.github.fuwia.GoleyRevivalLinux.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.fuwia.GoleyRevivalLinux.svg"
+  install -Dm644 "assets/io.github.fuwia.GoleyRevivalLinux.metainfo.xml" \
+    "$pkgdir/usr/share/metainfo/io.github.fuwia.GoleyRevivalLinux.metainfo.xml"
+  install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

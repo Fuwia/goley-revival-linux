@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Goley Revival
+Name[tr]=Goley Revival (Linux Başlatıcısı)
+Comment=Native GTK4 + Libadwaita Linux launcher for Goley Revival
+Comment[tr]=Goley Revival için doğal GTK4 + Libadwaita Linux başlatıcısı
+Exec=goley-revival-linux
+Icon=io.github.fuwia.GoleyRevivalLinux
+Terminal=false
+Type=Application
+Categories=Game;SportsGame;
+Keywords=goley;revival;football;soccer;launcher;linux;
+StartupNotify=true
+StartupWMClass=io.github.fuwia.GoleyRevivalLinux

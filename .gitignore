@@ -1,0 +1,11 @@
+/target/
+/ncrypt-shim/dist/
+*.dll
+*.o
+*.so
+*.AppImage
+*.tar.gz
+*.pkg.tar.zst
+/packaging/arch/pkg/
+/packaging/arch/src/
+.DS_Store

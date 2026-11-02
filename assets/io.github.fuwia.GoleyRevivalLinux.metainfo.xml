@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.fuwia.GoleyRevivalLinux</id>
+  <name>Goley Revival Linux</name>
+  <summary>Native GTK4 + Libadwaita Linux launcher for Goley Revival</summary>
+  <summary xml:lang="tr">Goley Revival için doğal GTK4 + Libadwaita Linux başlatıcısı</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      An Anime Game Launcher ve Faugus Launcher tarzında tasarlanmış, Goley Revival'ı Linux üzerinde Windows başlatıcı penceresini açmadan ve 0x80090029 (ncrypt ECDSA_P256) hatasına takılmadan çalıştıran doğal GTK4 + Libadwaita başlatıcısı.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.fuwia.GoleyRevivalLinux.desktop</launchable>
+  <url type="homepage">https://github.com/Fuwia/goley-revival-linux</url>
+  <developer id="io.github.fuwia">
+    <name>Fuwia</name>
+  </developer>
+</component>

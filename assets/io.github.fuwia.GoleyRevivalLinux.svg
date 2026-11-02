@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a2a4a"/>
+      <stop offset="55%" stop-color="#0f1b30"/>
+      <stop offset="100%" stop-color="#11382d"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#57e389"/>
+      <stop offset="100%" stop-color="#3584e4"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)" stroke="#3584e4" stroke-opacity="0.35" stroke-width="2"/>
+  <circle cx="64" cy="64" r="36" fill="none" stroke="url(#accent)" stroke-width="5"/>
+  <polygon points="64,45 77,55 72,71 56,71 51,55" fill="url(#accent)"/>
+  <line x1="64" y1="28" x2="64" y2="45" stroke="#78aeed" stroke-width="3" stroke-linecap="round"/>
+  <line x1="98" y1="53" x2="77" y2="55" stroke="#78aeed" stroke-width="3" stroke-linecap="round"/>
+  <line x1="85" y1="93" x2="72" y2="71" stroke="#57e389" stroke-width="3" stroke-linecap="round"/>
+  <line x1="43" y1="93" x2="56" y2="71" stroke="#57e389" stroke-width="3" stroke-linecap="round"/>
+  <line x1="30" y1="53" x2="51" y2="55" stroke="#78aeed" stroke-width="3" stroke-linecap="round"/>
+</svg>
