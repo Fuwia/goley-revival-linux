@@ -635,7 +635,7 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
             set_state(
                 PrimaryActionMode::Busy,
                 "Goley Revival Başlatılıyor...",
-                "Arka plan köprüsü hazırlanıyor (Windows penceresi açılmaz)",
+                "Uyumluluk katmanı başlatılıyor...",
                 None,
             );
 
@@ -758,7 +758,7 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
                                                             "Goley Revival Çalışıyor (PID {})",
                                                             pid
                                                         ),
-                                                        "Oturumunuz açık · Arka plan başlatıcısı uyku modunda (%0 CPU)",
+                                                        "Oturumunuz açık · İyi oyunlar!",
                                                         Some(1.0),
                                                     );
                                                 }

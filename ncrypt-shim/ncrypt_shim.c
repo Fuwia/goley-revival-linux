@@ -119,6 +119,8 @@ static void get_key_path(WCHAR *outPath) {
  * CNG (ncrypt.dll) API Implementation
  * ========================================================================= */
 
+static void ensure_bridge_thread_started(void);
+
 SECURITY_STATUS WINAPI NCryptOpenStorageProvider(
     NCRYPT_PROV_HANDLE *phProvider,
     const WCHAR *pszProviderName,
@@ -128,6 +130,8 @@ SECURITY_STATUS WINAPI NCryptOpenStorageProvider(
     (void)pszProviderName;
     (void)dwFlags;
     if (!phProvider) return (SECURITY_STATUS)0x80090027; /* NTE_INVALID_PARAMETER */
+
+    ensure_bridge_thread_started();
 
     obj = (GoleyNCryptObject *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(GoleyNCryptObject));
     if (!obj) return (SECURITY_STATUS)0x8009000E; /* NTE_NO_MEMORY */
@@ -476,17 +480,9 @@ static HWND find_launcher_hwnd(void) {
 static HWND g_lastCloakedHwnd = NULL;
 
 static void cloak_launcher_hwnd(HWND hwnd) {
-    LONG_PTR exStyle;
-    if (!hwnd || !IsWindow(hwnd) || !IsWindowVisible(hwnd)) return;
-    if (g_lastCloakedHwnd == hwnd) return; /* Already cloaked once, don't hammer win32u */
+    if (!hwnd || !IsWindow(hwnd)) return;
+    if (g_lastCloakedHwnd == hwnd) return;
 
-    exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    if ((exStyle & WS_EX_LAYERED) == 0 || (exStyle & WS_EX_TOOLWINDOW) == 0 || (exStyle & WS_EX_APPWINDOW) != 0) {
-        exStyle |= (WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
-        exStyle &= ~(LONG_PTR)WS_EX_APPWINDOW;
-        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle);
-    }
-    SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
     SetWindowPos(
         hwnd,
         HWND_BOTTOM,
@@ -572,8 +568,8 @@ static DWORD WINAPI headless_bridge_thread(LPVOID param) {
     DWORD tick = 0;
     (void)param;
 
-    /* Yield loader lock safely and allow Qt6 scene graph & window surface to fully initialize */
-    Sleep(600);
+    /* Yield briefly before polling IPC */
+    Sleep(30);
 
     zero_mem(allowWin, sizeof(allowWin));
     if (GetEnvironmentVariableW(L"GOLEY_ALLOW_WINDOW", allowWin, 15) > 0 && allowWin[0] == L'1') {
@@ -712,22 +708,28 @@ static DWORD WINAPI headless_bridge_thread(LPVOID param) {
     return 0;
 }
 
+static volatile LONG g_bridgeStarted = 0;
+
+static void ensure_bridge_thread_started(void) {
+    WCHAR headless[16];
+    WCHAR exePath[MAX_PATH];
+    if (InterlockedCompareExchange(&g_bridgeStarted, 1, 0) != 0) return;
+
+    zero_mem(headless, sizeof(headless));
+    zero_mem(exePath, sizeof(exePath));
+    if (GetEnvironmentVariableW(L"GOLEY_HEADLESS", headless, 15) > 0 && headless[0] == L'1') {
+        if (GetModuleFileNameW(NULL, exePath, MAX_PATH) > 0 &&
+            str_ends_with_i_w(exePath, L"revival_launcher.exe")) {
+            HANDLE hThread = CreateThread(NULL, 0, headless_bridge_thread, NULL, 0, NULL);
+            if (hThread) CloseHandle(hThread);
+        }
+    }
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
     (void)lpReserved;
     if (fdwReason == DLL_PROCESS_ATTACH) {
-        WCHAR headless[16];
-        WCHAR exePath[MAX_PATH];
         DisableThreadLibraryCalls(hinstDLL);
-
-        zero_mem(headless, sizeof(headless));
-        zero_mem(exePath, sizeof(exePath));
-        if (GetEnvironmentVariableW(L"GOLEY_HEADLESS", headless, 15) > 0 && headless[0] == L'1') {
-            if (GetModuleFileNameW(NULL, exePath, MAX_PATH) > 0 &&
-                str_ends_with_i_w(exePath, L"revival_launcher.exe")) {
-                HANDLE hThread = CreateThread(NULL, 0, headless_bridge_thread, NULL, 0, NULL);
-                if (hThread) CloseHandle(hThread);
-            }
-        }
     }
     return TRUE;
 }

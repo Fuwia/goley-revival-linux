@@ -142,8 +142,8 @@ fn run_session_inner(
         }
 
         let _ = tx.send_blocking(RunnerEvent::Status {
-            headline: "Uyumluluk katmanı başlatılıyor...".to_string(),
-            detail: format!("{} · Windows arayüzü gizli", runner.label),
+            headline: "Goley Revival Başlatılıyor...".to_string(),
+            detail: format!("{} çalıştırılıyor", runner.label),
             pulsing: true,
         });
 
@@ -184,10 +184,8 @@ fn run_session_inner(
         // Check if BinaryTrU.exe is already running!
         let (game_pid, launcher_pid) = find_running_pids();
         if let Some(gpid) = game_pid {
-            // Put Qt6 window into SW_HIDE so revival_launcher.exe uses 0% CPU during gameplay!
-            let _ = send_bridge_command(prefix, "SLEEP_UI\n");
             let _ = tx.send_blocking(RunnerEvent::LogLine(format!(
-                "[goley-revival-linux] BinaryTrU.exe çalışıyor (PID {}). Arka plan Qt6 arayüzü uyku moduna alındı (%0 CPU).",
+                "[goley-revival-linux] BinaryTrU.exe çalışıyor (PID {}).",
                 gpid
             )));
             let _ = tx.send_blocking(RunnerEvent::GameRunning { pid: gpid });
@@ -242,6 +240,11 @@ fn run_session_inner(
                         } else if trimmed.contains("-> Ready") {
                             phase_ready = true;
                             ready_since = Some(Instant::now());
+                            let _ = tx.send_blocking(RunnerEvent::Status {
+                                headline: "Goley Revival Hazır".to_string(),
+                                detail: "Resmi başlatıcı açıldı · Oyuna girmek için 'OYNA' butonuna tıklayın".to_string(),
+                                pulsing: false,
+                            });
                         } else if let Some(idx) = trimmed.find("AuthClient: login failed ->") {
                             let reason = trimmed[idx + "AuthClient: login failed ->".len()..]
                                 .trim()
@@ -383,9 +386,17 @@ fn build_runner_command(
             base_args.push(launcher_exe.to_string_lossy().to_string());
             let mut cmd = assemble_wrapped_command(&wrappers, &base_args);
             cmd.env("WINEPREFIX", &cfg.prefix_path);
-            cmd.env("GAMEID", "umu-default");
+            cmd.env("GAMEID", "revival");
+            cmd.env("FAUGUSID", "revival");
+            cmd.env("LOG_DIR", "revival");
+            cmd.env("UMU_CONTAINER_NSENTER", "1");
+            cmd.env("UMU_USE_STEAM", "1");
             if let Some(pdir) = proton_dir {
-                cmd.env("PROTONPATH", pdir);
+                if let Some(name) = pdir.file_name().and_then(|s| s.to_str()) {
+                    cmd.env("PROTONPATH", name);
+                } else {
+                    cmd.env("PROTONPATH", pdir);
+                }
             }
             apply_common_envs(&mut cmd, cfg);
             Ok(cmd)
@@ -429,12 +440,7 @@ fn assemble_wrapped_command(wrappers: &[String], base_args: &[String]) -> Comman
 
 fn apply_common_envs(cmd: &mut Command, cfg: &AppConfig) {
     cmd.env("WINEDLLOVERRIDES", "ncrypt=n,b;winedbg.exe=d");
-    cmd.env("GOLEY_HEADLESS", "1");
-    if cfg.show_debug_window {
-        cmd.env("GOLEY_ALLOW_WINDOW", "1");
-    } else {
-        cmd.env_remove("GOLEY_ALLOW_WINDOW");
-    }
+    cmd.env("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "0");
 
     for token in cfg.extra_env.split_whitespace() {
         if let Some((k, v)) = token.split_once('=') {
