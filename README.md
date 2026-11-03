@@ -2,9 +2,9 @@
 
 <img src="assets/io.github.fuwia.GoleyRevivalLinux.svg" width="112" height="112" alt="Revival Linux Icon" />
 
-# Goley Revival — Linux Başlatıcısı (`goley-revival-linux`)
+# Goley Revival — Linux Başlatıcısı :D
 
-**An Anime Game Launcher** ve **Faugus Launcher** tasarım çizgisinde, **Rust + GTK4 + Libadwaita** ile sıfırdan geliştirilmiş doğal (native) açık kaynak Goley Revival Linux başlatıcısı.
+**Rust + GTK4 + Libadwaita** ile sıfırdan geliştirilmiş doğal (native) açık kaynak Goley Revival Linux başlatıcısı.
 
 [![Rust](https://img.shields.io/badge/Dil-Rust%20%2B%20C-orange?style=flat-square&logo=rust)](Cargo.toml)
 [![GTK4 + Libadwaita](https://img.shields.io/badge/Aray%C3%BCz-GTK4%20%2B%20Libadwaita-4a86cf?style=flat-square&logo=gnome)](https://gnome.pages.gitlab.gnome.org/libadwaita/)
