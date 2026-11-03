@@ -32,7 +32,7 @@ enum PrimaryActionMode {
     Running,
 }
 
-pub fn build_ui(app: &adw::Application) {
+pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
     load_css();
     let initial_cfg = AppConfig::load();
     apply_color_scheme(&initial_cfg.color_scheme);
@@ -1226,6 +1226,34 @@ pub fn build_ui(app: &adw::Application) {
     }
 
     window.present();
+
+    if let Some(target_path) = snapshot_target {
+        let win_weak = window.downgrade();
+        let app_weak = app.downgrade();
+        glib::timeout_add_local(Duration::from_millis(2500), move || {
+            if let (Some(win), Some(app)) = (win_weak.upgrade(), app_weak.upgrade()) {
+                let w = win.width() as f64;
+                let h = win.height() as f64;
+                let paintable = gtk::WidgetPaintable::new(Some(&win));
+                let snapshot = gtk::Snapshot::new();
+                paintable.snapshot(&snapshot, w, h);
+                if let Some(node) = snapshot.to_node() {
+                    if let Some(native) = win.native() {
+                        if let Some(renderer) = native.renderer() {
+                            let texture = renderer.render_texture(&node, None);
+                            if let Err(e) = texture.save_to_png(&target_path) {
+                                eprintln!("Failed to save snapshot: {e}");
+                            } else {
+                                println!("Successfully saved launcher snapshot to: {target_path}");
+                            }
+                        }
+                    }
+                }
+                app.quit();
+            }
+            glib::ControlFlow::Break
+        });
+    }
 }
 
 fn create_info_tile(title: &str, initial_val: &str, icon_name: &str) -> (gtk::Box, gtk::Label) {

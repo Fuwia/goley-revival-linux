@@ -1,21 +1,111 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#1a2a4a"/>
-      <stop offset="55%" stop-color="#0f1b30"/>
-      <stop offset="100%" stop-color="#11382d"/>
+    <!-- Outer Soft Shadow (GNOME HIG) -->
+    <filter id="higShadow" x="-20%" y="-20%" width="140%" height="145%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4.5" flood-color="#04060a" flood-opacity="0.55"/>
+    </filter>
+
+    <!-- Inner Element Shadow -->
+    <filter id="elemShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+
+    <!-- Star Glow -->
+    <filter id="starGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#f6d32d" flood-opacity="0.5"/>
+    </filter>
+
+    <!-- Squircle Plate Gradient (Adwaita Dark Deep Navy) -->
+    <linearGradient id="tileBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#222b3d"/>
+      <stop offset="50%" stop-color="#181e2b"/>
+      <stop offset="100%" stop-color="#10131d"/>
     </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#57e389"/>
-      <stop offset="100%" stop-color="#3584e4"/>
+
+    <!-- Sapphire Blue Gradient -->
+    <linearGradient id="adwBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3584e4"/>
+      <stop offset="100%" stop-color="#1c71d8"/>
     </linearGradient>
+
+    <!-- Emerald Turf Green Gradient -->
+    <linearGradient id="adwGreen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#33d17a"/>
+      <stop offset="100%" stop-color="#26a269"/>
+    </linearGradient>
+
+    <!-- Ball Shading (Clean 3D Sphere) -->
+    <radialGradient id="ballShading" cx="38%" cy="32%" r="68%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="65%" stop-color="#e2e7ec"/>
+      <stop offset="100%" stop-color="#b0bac6"/>
+    </radialGradient>
+
+    <!-- Dark Panels -->
+    <linearGradient id="darkLeather" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#283241"/>
+      <stop offset="100%" stop-color="#161b24"/>
+    </linearGradient>
+
+    <clipPath id="ballClip">
+      <circle cx="64" cy="56" r="29"/>
+    </clipPath>
   </defs>
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)" stroke="#3584e4" stroke-opacity="0.35" stroke-width="2"/>
-  <circle cx="64" cy="64" r="36" fill="none" stroke="url(#accent)" stroke-width="5"/>
-  <polygon points="64,45 77,55 72,71 56,71 51,55" fill="url(#accent)"/>
-  <line x1="64" y1="28" x2="64" y2="45" stroke="#78aeed" stroke-width="3" stroke-linecap="round"/>
-  <line x1="98" y1="53" x2="77" y2="55" stroke="#78aeed" stroke-width="3" stroke-linecap="round"/>
-  <line x1="85" y1="93" x2="72" y2="71" stroke="#57e389" stroke-width="3" stroke-linecap="round"/>
-  <line x1="43" y1="93" x2="56" y2="71" stroke="#57e389" stroke-width="3" stroke-linecap="round"/>
-  <line x1="30" y1="53" x2="51" y2="55" stroke="#78aeed" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- 1. GNOME HIG Squircle Base (108x108 on 128 canvas) -->
+  <rect x="10" y="10" width="108" height="108" rx="26" ry="26" fill="url(#tileBg)" filter="url(#higShadow)"/>
+  
+  <!-- Subtle HIG Rim Highlight -->
+  <rect x="10.5" y="10.5" width="107" height="107" rx="25.5" ry="25.5" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1"/>
+
+  <!-- Subtle Pitch Center Circle in background -->
+  <circle cx="64" cy="56" r="42" fill="none" stroke="#3584e4" stroke-opacity="0.12" stroke-width="2"/>
+  <line x1="18" y1="56" x2="110" y2="56" stroke="#2ec27e" stroke-opacity="0.1" stroke-width="1.5"/>
+
+  <!-- 2. Football Sphere -->
+  <circle cx="64" cy="56" r="29" fill="url(#ballShading)" filter="url(#elemShadow)"/>
+
+  <!-- Football Leather Panels (Mathematically Balanced Telstar Geometry) -->
+  <g clip-path="url(#ballClip)">
+    <!-- Center Dark Pentagon -->
+    <polygon points="64,45 74,52 70,64 58,64 54,52" fill="url(#darkLeather)"/>
+
+    <!-- Seam Lines -->
+    <line x1="64" y1="45" x2="64" y2="29" stroke="#202733" stroke-width="2.4" stroke-linecap="round"/>
+    <line x1="74" y1="52" x2="89" y2="47" stroke="#202733" stroke-width="2.4" stroke-linecap="round"/>
+    <line x1="70" y1="64" x2="81" y2="79" stroke="#202733" stroke-width="2.4" stroke-linecap="round"/>
+    <line x1="58" y1="64" x2="47" y2="79" stroke="#202733" stroke-width="2.4" stroke-linecap="round"/>
+    <line x1="54" y1="52" x2="39" y2="47" stroke="#202733" stroke-width="2.4" stroke-linecap="round"/>
+
+    <!-- Perimeter Edge Dark Panels -->
+    <polygon points="57,28 71,28 64,29" fill="url(#darkLeather)"/>
+    <polygon points="89,47 94,40 94,54" fill="url(#darkLeather)"/>
+    <polygon points="81,79 90,72 82,86" fill="url(#darkLeather)"/>
+    <polygon points="47,79 46,86 38,72" fill="url(#darkLeather)"/>
+    <polygon points="39,47 34,54 34,40" fill="url(#darkLeather)"/>
+
+    <!-- Specular Light Sheen -->
+    <ellipse cx="55" cy="43" rx="16" ry="10" fill="#ffffff" opacity="0.28" transform="rotate(-28 55 43)"/>
+  </g>
+
+  <!-- Rim highlight around the sphere -->
+  <circle cx="64" cy="56" r="29" fill="none" stroke="#ffffff" stroke-opacity="0.32" stroke-width="1"/>
+
+  <!-- 3. Gold Championship Star at Top -->
+  <g filter="url(#starGlow)">
+    <polygon points="64,15 66.5,20.2 72.2,20.6 67.8,24.3 69.1,29.8 64,26.8 58.9,29.8 60.2,24.3 55.8,20.6 61.5,20.2" fill="#f6d32d"/>
+  </g>
+
+  <!-- 4. Dynamic Dual Speed Swooshes wrapping the ball -->
+  <g filter="url(#elemShadow)">
+    <path d="M 28,78 C 39,76 50,77 62,76 C 76,75 88,69 94,60 C 91,66 82,72 68,74 C 54,76 40,75 28,78 Z" fill="url(#adwBlue)"/>
+    <path d="M 34,82 C 45,80 57,81 70,80 C 82,79 92,73 97,66 C 94,71 85,76 72,78 C 58,80 46,79 34,82 Z" fill="url(#adwGreen)"/>
+  </g>
+
+  <!-- 5. "REVIVAL LINUX" Brand Pill Plaque at Bottom -->
+  <g filter="url(#elemShadow)">
+    <rect x="20" y="93" width="88" height="18" rx="9" ry="9" fill="#141923" stroke="#3584e4" stroke-opacity="0.35" stroke-width="1"/>
+    <rect x="21" y="94" width="86" height="8" rx="4" ry="4" fill="#ffffff" opacity="0.04"/>
+    <text x="64" y="105.5" font-family="Cantarell, 'DejaVu Sans', -apple-system, sans-serif" font-size="7.5" font-weight="800" letter-spacing="1.2" fill="#ffffff" text-anchor="middle">REVIVAL LINUX</text>
+  </g>
 </svg>

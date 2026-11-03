@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/io.github.fuwia.GoleyRevivalLinux.svg" width="108" height="108" alt="Goley Revival Linux Icon" />
+<img src="assets/io.github.fuwia.GoleyRevivalLinux.svg" width="112" height="112" alt="Revival Linux Icon" />
 
 # Goley Revival — Linux Başlatıcısı (`goley-revival-linux`)
 
@@ -9,7 +9,14 @@
 [![Rust](https://img.shields.io/badge/Dil-Rust%20%2B%20C-orange?style=flat-square&logo=rust)](Cargo.toml)
 [![GTK4 + Libadwaita](https://img.shields.io/badge/Aray%C3%BCz-GTK4%20%2B%20Libadwaita-4a86cf?style=flat-square&logo=gnome)](https://gnome.pages.gitlab.gnome.org/libadwaita/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20x86__64-2ec27e?style=flat-square&logo=linux)](#kurulum-rehberi-t%C3%BCm-linux-da%C4%9F%C4%B1t%C4%B1mlar%C4%B1)
+[![Sürüm](https://img.shields.io/badge/S%C3%BCr%C3%BCm-v0.1.1-blueviolet?style=flat-square)](https://github.com/Fuwia/goley-revival-linux/releases)
 [![Lisans](https://img.shields.io/badge/Lisans-GPL--3.0-blue?style=flat-square)](LICENSE)
+
+<br/><br/>
+
+<img src="assets/screenshots/launcher_main.png" width="900" alt="Goley Revival Linux Doğal GTK4 Arayüzü" />
+
+*GTK4 + Libadwaita ile canlı duyurular, tek tıkla güncelleme, Proton-GE ve DirectInput8 ok tuşları entegrasyonu*
 
 </div>
 
