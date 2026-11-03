@@ -383,7 +383,7 @@ pub fn build_ui(app: &adw::Application) {
             }
 
             if check_shims_installed(&c.prefix_path) {
-                l_shim.set_text("Aktif (x64 + x86 Kurulu)");
+                l_shim.set_text("Aktif (ncrypt + dinput8)");
             } else {
                 l_shim.set_text("Otomatik Kurulacak");
             }

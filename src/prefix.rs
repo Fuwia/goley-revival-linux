@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 pub const NCRYPT64_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ncrypt64.dll"));
 pub const NCRYPT32_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ncrypt32.dll"));
+pub const DINPUT8_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/dinput8.dll"));
 
 #[derive(Debug, Clone)]
 pub struct RunnerOption {
@@ -246,6 +247,8 @@ pub fn install_ncrypt_shims(prefix: &Path) -> Result<(), String> {
     // Always place next to revival_launcher.exe (x64) and BinaryTrU.exe (x86)
     atomic_write_file(&rev_root.join("ncrypt.dll"), NCRYPT64_BYTES)?;
     atomic_write_file(&bin_tr.join("ncrypt.dll"), NCRYPT32_BYTES)?;
+    // DirectInput8 keyboard / arrow key shim next to BinaryTrU.exe
+    atomic_write_file(&bin_tr.join("dinput8.dll"), DINPUT8_BYTES)?;
 
     // Also install into system32 (64-bit) & syswow64 (32-bit) if prefix windows dirs exist
     if sys32.is_dir() {
@@ -266,7 +269,8 @@ pub fn install_ncrypt_shims(prefix: &Path) -> Result<(), String> {
 pub fn check_shims_installed(prefix: &Path) -> bool {
     let x64 = revival_root_dir(prefix).join("ncrypt.dll");
     let x86 = revival_game_dir(prefix).join("BinaryTr/ncrypt.dll");
-    x64.is_file() && x86.is_file()
+    let di8 = revival_game_dir(prefix).join("BinaryTr/dinput8.dll");
+    x64.is_file() && x86.is_file() && di8.is_file()
 }
 
 pub fn ensure_dll_override_in_user_reg(prefix: &Path) -> Result<(), String> {
@@ -275,18 +279,31 @@ pub fn ensure_dll_override_in_user_reg(prefix: &Path) -> Result<(), String> {
         return Ok(());
     }
     let content = fs::read_to_string(&reg_path).map_err(|e| e.to_string())?;
-    if content.contains("\"ncrypt\"=\"native,builtin\"") {
+
+    let mut dirty = false;
+    let mut overrides = Vec::new();
+    if !content.contains("\"ncrypt\"=\"native,builtin\"") {
+        overrides.push("\"ncrypt\"=\"native,builtin\"");
+        dirty = true;
+    }
+    if !content.contains("\"dinput8\"=\"native,builtin\"") {
+        overrides.push("\"dinput8\"=\"native,builtin\"");
+        dirty = true;
+    }
+
+    if !dirty {
         return Ok(());
     }
 
+    let insert_text = format!("{}\n", overrides.join("\n"));
     let mut updated = content.clone();
     if let Some(pos) = updated.find("[Software\\\\Wine\\\\DllOverrides]") {
         if let Some(line_end) = updated[pos..].find('\n') {
             let insert_at = pos + line_end + 1;
-            updated.insert_str(insert_at, "\"ncrypt\"=\"native,builtin\"\n");
+            updated.insert_str(insert_at, &insert_text);
         }
     } else {
-        updated.push_str("\n[Software\\\\Wine\\\\DllOverrides] 1793659200\n\"ncrypt\"=\"native,builtin\"\n");
+        updated.push_str(&format!("\n[Software\\\\Wine\\\\DllOverrides] 1793659200\n{}", insert_text));
     }
 
     atomic_write_file(&reg_path, updated.as_bytes())

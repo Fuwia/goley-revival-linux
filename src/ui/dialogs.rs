@@ -626,8 +626,8 @@ pub fn present_preferences_dialog<FRepair, FVerify>(
         .build();
 
     let row_shim = adw::ActionRow::builder()
-        .title("CNG ECDSA_P256 (ncrypt.dll) Köprüsü")
-        .subtitle("'Sunucuya ulaşılamadı (0x80090029)' hatasını çözen 64-bit ve 32-bit şifreleme köprüsü")
+        .title("Linux Uyumluluk Köprüleri (ncrypt.dll & dinput8.dll)")
+        .subtitle("ECDSA_P256 oturum şifreleme ve oyun içi DirectInput8 ok/yön tuşları köprüsü")
         .build();
     let btn_shim = gtk::Button::with_label("Yeniden Kur");
     btn_shim.set_valign(gtk::Align::Center);
@@ -639,7 +639,7 @@ pub fn present_preferences_dialog<FRepair, FVerify>(
                 Ok(_) => {
                     on_repair_shims();
                     toast_ov.add_toast(adw::Toast::new(
-                        "64-bit ve 32-bit ncrypt.dll köprüleri başarıyla kuruldu",
+                        "ncrypt.dll ve dinput8.dll köprüleri başarıyla kuruldu",
                     ));
                 }
                 Err(e) => {

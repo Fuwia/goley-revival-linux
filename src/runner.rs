@@ -428,7 +428,7 @@ fn assemble_wrapped_command(wrappers: &[String], base_args: &[String]) -> Comman
 }
 
 fn apply_common_envs(cmd: &mut Command, cfg: &AppConfig) {
-    cmd.env("WINEDLLOVERRIDES", "ncrypt=n,b");
+    cmd.env("WINEDLLOVERRIDES", "ncrypt,dinput8=n,b");
     cmd.env("GOLEY_HEADLESS", "1");
     if cfg.show_debug_window {
         cmd.env("GOLEY_ALLOW_WINDOW", "1");

@@ -38,6 +38,7 @@ Goley Revival'ı (`playrevival.co`) Linux üzerinde Wine veya Proton ile doğrud
 - 🎨 **Doğal GNOME / Linux Görünümü:** *An Anime Game Launcher* ve *Faugus Launcher* gibi saf **GTK4 + Libadwaita** arayüzü. KDE Plasma, GNOME, Hyprland, Cinnamon, XFCE ve COSMIC ile tam uyumlu Koyu/Açık/Sistem teması.
 - 👻 **Görünmez Arka Plan Köprüsü (Sıfır Windows Arayüzü):** Resmi `revival_launcher.exe` arka planda görünmez olarak oturum biletini (120 saniyelik tek kullanımlık ticket) üretir; anti-cheat ve sunucu doğrulaması %100 resmi akışla çalışır.
 - 🔐 **Otomatik `ncrypt.dll` (`ECDSA_P256`) Yaması:** Hem `revival_launcher.exe` (x64) hem `BinaryTr/BinaryTrU.exe` (x86) için kalıcı `ECDSA_P256` anahtar sağlayıcısını otomatik kurar ve onarır.
+- 🎯 **Oyun İçi Ok Tuşları (DirectInput8) Düzeltmesi:** Goley Revival'da futbolcu yönlendirmesi için kullanılan Ok Tuşları (`Yukarı/Aşağı/Sol/Sağ`), Linux/Wine/XWayland ortamlarında DirectInput8 RawInput kancaları nedeniyle çalışmaz veya Numpad tuşlarıyla çakışır. Başlatıcı içine gömülü gelen açık kaynak **32-bit `dinput8.dll` köprüsü** sayesinde yön tuşları kusursuz ve gecikmesiz çalışır.
 - ⚡ **Windows `Setup.exe` Gerektirmeyen Hızlı CDN Kurulumu:** Oyunu sıfırdan resmi `patch.playrevival.co` CDN'i üzerinden **6 paralel bağlantı** ve **SHA-256 bütünlük doğrulamasıyla** indirir ve günceller.
 - 🔄 **Mevcut Kurulumları Otomatik Tanıma:** Bilgisayarınızda daha önce Faugus Launcher (`~/Faugus/default`), Lutris veya `~/.wine` ile kurulmuş Goley Revival varsa tekrar indirmeden otomatik algılar.
 - 🚀 **Oyun Araçları Entegrasyonu:** **UMU-Launcher (`umu-run`)**, **Proton-GE**, **Proton-CachyOS**, **Wine**, **Feral GameMode**, **MangoHud** ve **Gamescope** desteği + tek tıkla **NVIDIA PhysX** kurulumu.
@@ -58,6 +59,7 @@ Goley Revival'ı (`playrevival.co`) Linux üzerinde Wine veya Proton ile doğrud
 ┌───────────────────────────────┐      ┌───────────────────────────────┐
 │  api.playrevival.co           │      │ Proton-GE / UMU / Wine Prefix │
 │  patch.playrevival.co/objects │      │ • ncrypt.dll (x64 & x86 shim) │
+│                               │      │ • dinput8.dll (x86 arrow fix) │
 └───────────────────────────────┘      │ • Gizli revival_launcher.exe  │
                                        │ • BinaryTrU.exe (Oyun Ekranı) │
                                        └───────────────────────────────┘
@@ -243,7 +245,13 @@ Sisteminizde `umu-run` veya `wine` kurulu olduğundan emin olun. En iyi deneyim 
 <details>
 <summary><b>Daha önce aldığım "Sunucuya ulaşılamadı (0x80090029)" hatası devam ederse ne yapmalıyım?</b></summary>
 
-Sağ üstteki ⚙️ **Ayarlar -> Bakım ve Onarım** sekmesinden **"CNG ECDSA_P256 (ncrypt.dll) Köprüsü -> Yeniden Kur"** butonuna tıklayın. Bu işlem hem 64-bit hem 32-bit `ncrypt.dll` dosyalarını ve `WINEDLLOVERRIDES="ncrypt=n,b"` ayarını otomatik olarak yeniler.
+Sağ üstteki ⚙️ **Ayarlar -> Bakım ve Onarım** sekmesinden **"Linux Uyumluluk Köprüleri -> Yeniden Kur"** butonuna tıklayın. Bu işlem hem 64-bit hem 32-bit `ncrypt.dll` dosyalarını ve `WINEDLLOVERRIDES="ncrypt,dinput8=n,b"` ayarını otomatik olarak yeniler.
+</details>
+
+<details>
+<summary><b>Oyun içinde futbolcu ok tuşlarıyla (Yukarı/Aşağı/Sol/Sağ) hareket etmiyor, ne yapmalıyım?</b></summary>
+
+Goley Revival maç esnasında yönlendirmeyi DirectInput8 scancode tablosu üzerinden okur. Linux ve Wine ortamlarında RawInput kancaları veya XWayland tuş haritalandırması nedeniyle ok tuşları Numpad ile karışabilir veya tamamen kaybolabilir. Başlatıcı içine entegre edilen açık kaynak **32-bit `dinput8.dll` köprüsü** bu sorunu tamamen çözer. Başlatıcıyı açıp oyuna girdiğinizde yön tuşları otomatik olarak aktif olacaktır; gerektiğinde **Ayarlar -> Bakım ve Onarım** sekmesinden *"Yeniden Kur"* butonuna basarak köprüyü tazeleyebilirsiniz.
 </details>
 
 <details>
@@ -269,5 +277,6 @@ curl -fsSL https://raw.githubusercontent.com/Fuwia/goley-revival-linux/main/unin
 Bu proje topluluk tarafından Linux oyuncularının Goley Revival'ı özgür ve akıcı şekilde oynayabilmesi için geliştirilmiştir; resmi Goley Revival yönetimi ile doğrudan bir bağı yoktur.
 
 - **ncrypt Köprüsü Kaynak Kodu:** [`ncrypt-shim/ncrypt_shim.c`](ncrypt-shim/ncrypt_shim.c)
+- **DirectInput8 Ok Tuşları Köprüsü:** [`ncrypt-shim/dinput8_shim.c`](ncrypt-shim/dinput8_shim.c)
 - **GTK4 + Libadwaita Arayüzü:** [`src/`](src/)
 - **Lisans:** [GNU General Public License v3.0 (GPL-3.0)](LICENSE)

@@ -5,6 +5,8 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-changed=ncrypt-shim/ncrypt_shim.c");
     println!("cargo:rerun-if-changed=ncrypt-shim/ncrypt.def");
+    println!("cargo:rerun-if-changed=ncrypt-shim/dinput8_shim.c");
+    println!("cargo:rerun-if-changed=ncrypt-shim/dinput8.def");
     println!("cargo:rerun-if-changed=ncrypt-shim/build.sh");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR missing"));
