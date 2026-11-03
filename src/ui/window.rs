@@ -383,7 +383,7 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
             }
 
             if check_shims_installed(&c.prefix_path) {
-                l_shim.set_text("Aktif (ncrypt + dinput8)");
+                l_shim.set_text("Aktif (ncrypt)");
             } else {
                 l_shim.set_text("Otomatik Kurulacak");
             }

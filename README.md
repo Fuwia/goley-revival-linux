@@ -9,14 +9,14 @@
 [![Rust](https://img.shields.io/badge/Dil-Rust%20%2B%20C-orange?style=flat-square&logo=rust)](Cargo.toml)
 [![GTK4 + Libadwaita](https://img.shields.io/badge/Aray%C3%BCz-GTK4%20%2B%20Libadwaita-4a86cf?style=flat-square&logo=gnome)](https://gnome.pages.gitlab.gnome.org/libadwaita/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20x86__64-2ec27e?style=flat-square&logo=linux)](#kurulum-rehberi-t%C3%BCm-linux-da%C4%9F%C4%B1t%C4%B1mlar%C4%B1)
-[![Sürüm](https://img.shields.io/badge/S%C3%BCr%C3%BCm-v0.1.1-blueviolet?style=flat-square)](https://github.com/Fuwia/goley-revival-linux/releases)
+[![Sürüm](https://img.shields.io/badge/S%C3%BCr%C3%BCm-v0.1.2-blueviolet?style=flat-square)](https://github.com/Fuwia/goley-revival-linux/releases)
 [![Lisans](https://img.shields.io/badge/Lisans-GPL--3.0-blue?style=flat-square)](LICENSE)
 
 <br/><br/>
 
 <img src="assets/screenshots/launcher_main.png" width="900" alt="Goley Revival Linux Doğal GTK4 Arayüzü" />
 
-*GTK4 + Libadwaita ile canlı duyurular, tek tıkla güncelleme, Proton-GE ve DirectInput8 ok tuşları entegrasyonu*
+*GTK4 + Libadwaita ile canlı duyurular, tek tıkla CDN kurulumu, Proton-GE ve ncrypt oturum köprüsü entegrasyonu*
 
 </div>
 
@@ -45,7 +45,6 @@ Goley Revival'ı (`playrevival.co`) Linux üzerinde Wine veya Proton ile doğrud
 - 🎨 **Doğal GNOME / Linux Görünümü:** *An Anime Game Launcher* ve *Faugus Launcher* gibi saf **GTK4 + Libadwaita** arayüzü. KDE Plasma, GNOME, Hyprland, Cinnamon, XFCE ve COSMIC ile tam uyumlu Koyu/Açık/Sistem teması.
 - 👻 **Görünmez Arka Plan Köprüsü (Sıfır Windows Arayüzü):** Resmi `revival_launcher.exe` arka planda görünmez olarak oturum biletini (120 saniyelik tek kullanımlık ticket) üretir; anti-cheat ve sunucu doğrulaması %100 resmi akışla çalışır.
 - 🔐 **Otomatik `ncrypt.dll` (`ECDSA_P256`) Yaması:** Hem `revival_launcher.exe` (x64) hem `BinaryTr/BinaryTrU.exe` (x86) için kalıcı `ECDSA_P256` anahtar sağlayıcısını otomatik kurar ve onarır.
-- 🎯 **Oyun İçi Ok Tuşları (DirectInput8) Düzeltmesi:** Goley Revival'da futbolcu yönlendirmesi için kullanılan Ok Tuşları (`Yukarı/Aşağı/Sol/Sağ`), Linux/Wine/XWayland ortamlarında DirectInput8 RawInput kancaları nedeniyle çalışmaz veya Numpad tuşlarıyla çakışır. Başlatıcı içine gömülü gelen açık kaynak **32-bit `dinput8.dll` köprüsü** sayesinde yön tuşları kusursuz ve gecikmesiz çalışır.
 - ⚡ **Windows `Setup.exe` Gerektirmeyen Hızlı CDN Kurulumu:** Oyunu sıfırdan resmi `patch.playrevival.co` CDN'i üzerinden **6 paralel bağlantı** ve **SHA-256 bütünlük doğrulamasıyla** indirir ve günceller.
 - 🔄 **Mevcut Kurulumları Otomatik Tanıma:** Bilgisayarınızda daha önce Faugus Launcher (`~/Faugus/default`), Lutris veya `~/.wine` ile kurulmuş Goley Revival varsa tekrar indirmeden otomatik algılar.
 - 🚀 **Oyun Araçları Entegrasyonu:** **UMU-Launcher (`umu-run`)**, **Proton-GE**, **Proton-CachyOS**, **Wine**, **Feral GameMode**, **MangoHud** ve **Gamescope** desteği + tek tıkla **NVIDIA PhysX** kurulumu.
@@ -66,9 +65,8 @@ Goley Revival'ı (`playrevival.co`) Linux üzerinde Wine veya Proton ile doğrud
 ┌───────────────────────────────┐      ┌───────────────────────────────┐
 │  api.playrevival.co           │      │ Proton-GE / UMU / Wine Prefix │
 │  patch.playrevival.co/objects │      │ • ncrypt.dll (x64 & x86 shim) │
-│                               │      │ • dinput8.dll (x86 arrow fix) │
-└───────────────────────────────┘      │ • Gizli revival_launcher.exe  │
-                                       │ • BinaryTrU.exe (Oyun Ekranı) │
+│                               │      │ • Gizli revival_launcher.exe  │
+└───────────────────────────────┘      │ • BinaryTrU.exe (Oyun Ekranı) │
                                        └───────────────────────────────┘
 ```
 
@@ -252,13 +250,13 @@ Sisteminizde `umu-run` veya `wine` kurulu olduğundan emin olun. En iyi deneyim 
 <details>
 <summary><b>Daha önce aldığım "Sunucuya ulaşılamadı (0x80090029)" hatası devam ederse ne yapmalıyım?</b></summary>
 
-Sağ üstteki ⚙️ **Ayarlar -> Bakım ve Onarım** sekmesinden **"Linux Uyumluluk Köprüleri -> Yeniden Kur"** butonuna tıklayın. Bu işlem hem 64-bit hem 32-bit `ncrypt.dll` dosyalarını ve `WINEDLLOVERRIDES="ncrypt,dinput8=n,b"` ayarını otomatik olarak yeniler.
+Sağ üstteki ⚙️ **Ayarlar -> Bakım ve Onarım** sekmesinden **"Linux Uyumluluk Köprüleri -> Yeniden Kur"** butonuna tıklayın. Bu işlem hem 64-bit hem 32-bit `ncrypt.dll` dosyalarını ve `WINEDLLOVERRIDES="ncrypt=n,b"` ayarını otomatik olarak yeniler.
 </details>
 
 <details>
-<summary><b>Oyun içinde futbolcu ok tuşlarıyla (Yukarı/Aşağı/Sol/Sağ) hareket etmiyor, ne yapmalıyım?</b></summary>
+<summary><b>Oyun içinde yönlendirme veya ok tuşları nasıl kullanılır?</b></summary>
 
-Goley Revival maç esnasında yönlendirmeyi DirectInput8 scancode tablosu üzerinden okur. Linux ve Wine ortamlarında RawInput kancaları veya XWayland tuş haritalandırması nedeniyle ok tuşları Numpad ile karışabilir veya tamamen kaybolabilir. Başlatıcı içine entegre edilen açık kaynak **32-bit `dinput8.dll` köprüsü** bu sorunu tamamen çözer. Başlatıcıyı açıp oyuna girdiğinizde yön tuşları otomatik olarak aktif olacaktır; gerektiğinde **Ayarlar -> Bakım ve Onarım** sekmesinden *"Yeniden Kur"* butonuna basarak köprüyü tazeleyebilirsiniz.
+Goley Revival'da maç esnasında yönlendirme varsayılan olarak **W-A-S-D** tuşları veya oyun kolu (gamepad) ile sorunsuz çalışır. Wine / XWayland ortamında bazı klavye düzenlerinde ok tuşları yerine **W-A-S-D** veya Gamepad kullanımı en kararlı ve akıcı deneyimi sunar.
 </details>
 
 <details>
@@ -284,6 +282,5 @@ curl -fsSL https://raw.githubusercontent.com/Fuwia/goley-revival-linux/main/unin
 Bu proje topluluk tarafından Linux oyuncularının Goley Revival'ı özgür ve akıcı şekilde oynayabilmesi için geliştirilmiştir; resmi Goley Revival yönetimi ile doğrudan bir bağı yoktur.
 
 - **ncrypt Köprüsü Kaynak Kodu:** [`ncrypt-shim/ncrypt_shim.c`](ncrypt-shim/ncrypt_shim.c)
-- **DirectInput8 Ok Tuşları Köprüsü:** [`ncrypt-shim/dinput8_shim.c`](ncrypt-shim/dinput8_shim.c)
 - **GTK4 + Libadwaita Arayüzü:** [`src/`](src/)
 - **Lisans:** [GNU General Public License v3.0 (GPL-3.0)](LICENSE)
