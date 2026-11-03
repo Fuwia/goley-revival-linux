@@ -442,6 +442,8 @@ static BOOL CALLBACK enum_launcher_windows_cb(HWND hwnd, LPARAM lParam) {
     WCHAR cls[128];
     RECT rc;
 
+    if (!hwnd || !IsWindow(hwnd) || !IsWindowVisible(hwnd)) return TRUE;
+
     GetWindowThreadProcessId(hwnd, &wndPid);
     if (wndPid != ctx->pid) return TRUE;
     if (GetWindow(hwnd, GW_OWNER) != NULL) return TRUE;
@@ -455,7 +457,7 @@ static BOOL CALLBACK enum_launcher_windows_cb(HWND hwnd, LPARAM lParam) {
         (cls[0] == L'Q' && cls[1] == L't')) {
         zero_mem(&rc, sizeof(rc));
         GetClientRect(hwnd, &rc);
-        if ((rc.right - rc.left) >= 400 || lstrcmpiW(title, L"Revival") == 0) {
+        if ((rc.right - rc.left) >= 400 && (rc.bottom - rc.top) >= 300) {
             ctx->found = hwnd;
             return FALSE;
         }
@@ -471,9 +473,12 @@ static HWND find_launcher_hwnd(void) {
     return ctx.found;
 }
 
+static HWND g_lastCloakedHwnd = NULL;
+
 static void cloak_launcher_hwnd(HWND hwnd) {
     LONG_PTR exStyle;
-    if (!hwnd || !IsWindow(hwnd)) return;
+    if (!hwnd || !IsWindow(hwnd) || !IsWindowVisible(hwnd)) return;
+    if (g_lastCloakedHwnd == hwnd) return; /* Already cloaked once, don't hammer win32u */
 
     exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
     if ((exStyle & WS_EX_LAYERED) == 0 || (exStyle & WS_EX_TOOLWINDOW) == 0 || (exStyle & WS_EX_APPWINDOW) != 0) {
@@ -491,6 +496,7 @@ static void cloak_launcher_hwnd(HWND hwnd) {
         0,
         SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER
     );
+    g_lastCloakedHwnd = hwnd;
 }
 
 static void write_bridge_status(const char *msg) {
@@ -566,8 +572,8 @@ static DWORD WINAPI headless_bridge_thread(LPVOID param) {
     DWORD tick = 0;
     (void)param;
 
-    /* Yield loader lock safely before touching user32 */
-    Sleep(25);
+    /* Yield loader lock safely and allow Qt6 scene graph & window surface to fully initialize */
+    Sleep(600);
 
     zero_mem(allowWin, sizeof(allowWin));
     if (GetEnvironmentVariableW(L"GOLEY_ALLOW_WINDOW", allowWin, 15) > 0 && allowWin[0] == L'1') {
@@ -621,10 +627,12 @@ static DWORD WINAPI headless_bridge_thread(LPVOID param) {
                     ExitProcess(0);
                 } else if (str_starts_with_a(buf, "SLEEP_UI")) {
                     uiSleeping = TRUE;
+                    g_lastCloakedHwnd = NULL;
                     if (hwnd && hideWindow) ShowWindow(hwnd, SW_HIDE);
                     write_bridge_status("ACK_SLEEP_UI\n");
                 } else if (str_starts_with_a(buf, "WAKE_UI")) {
                     uiSleeping = FALSE;
+                    g_lastCloakedHwnd = NULL;
                     if (hwnd && hideWindow) {
                         ShowWindow(hwnd, SW_SHOWNA);
                         cloak_launcher_hwnd(hwnd);
@@ -634,6 +642,7 @@ static DWORD WINAPI headless_bridge_thread(LPVOID param) {
                     int w, h;
                     if (uiSleeping) {
                         uiSleeping = FALSE;
+                        g_lastCloakedHwnd = NULL;
                         ShowWindow(hwnd, SW_SHOWNA);
                         if (hideWindow) cloak_launcher_hwnd(hwnd);
                         Sleep(80);
@@ -660,6 +669,7 @@ static DWORD WINAPI headless_bridge_thread(LPVOID param) {
                     if (pass) {
                         if (uiSleeping) {
                             uiSleeping = FALSE;
+                            g_lastCloakedHwnd = NULL;
                             ShowWindow(hwnd, SW_SHOWNA);
                             if (hideWindow) cloak_launcher_hwnd(hwnd);
                             Sleep(80);
@@ -697,7 +707,7 @@ static DWORD WINAPI headless_bridge_thread(LPVOID param) {
         }
 
         tick++;
-        Sleep(tick < 200 ? 20 : 45);
+        Sleep(50);
     }
     return 0;
 }

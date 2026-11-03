@@ -291,12 +291,20 @@ pub fn ensure_dll_override_in_user_reg(prefix: &Path) -> Result<(), String> {
         if let Some(pos) = updated.find("[Software\\\\Wine\\\\DllOverrides]") {
             if let Some(line_end) = updated[pos..].find('\n') {
                 let insert_at = pos + line_end + 1;
-                updated.insert_str(insert_at, "\"ncrypt\"=\"native,builtin\"\n");
+                updated.insert_str(insert_at, "\"ncrypt\"=\"native,builtin\"\n\"winedbg.exe\"=\"disabled\"\n");
                 dirty = true;
             }
         } else {
-            updated.push_str("\n[Software\\\\Wine\\\\DllOverrides] 1793659200\n\"ncrypt\"=\"native,builtin\"\n");
+            updated.push_str("\n[Software\\\\Wine\\\\DllOverrides] 1793659200\n\"ncrypt\"=\"native,builtin\"\n\"winedbg.exe\"=\"disabled\"\n");
             dirty = true;
+        }
+    } else if !updated.contains("\"winedbg.exe\"=") {
+        if let Some(pos) = updated.find("[Software\\\\Wine\\\\DllOverrides]") {
+            if let Some(line_end) = updated[pos..].find('\n') {
+                let insert_at = pos + line_end + 1;
+                updated.insert_str(insert_at, "\"winedbg.exe\"=\"disabled\"\n");
+                dirty = true;
+            }
         }
     }
 

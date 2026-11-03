@@ -383,17 +383,9 @@ fn build_runner_command(
             base_args.push(launcher_exe.to_string_lossy().to_string());
             let mut cmd = assemble_wrapped_command(&wrappers, &base_args);
             cmd.env("WINEPREFIX", &cfg.prefix_path);
-            cmd.env("GAMEID", "revival");
-            cmd.env("FAUGUSID", "revival");
-            cmd.env("LOG_DIR", "revival");
-            cmd.env("UMU_CONTAINER_NSENTER", "1");
-            cmd.env("UMU_USE_STEAM", "1");
+            cmd.env("GAMEID", "umu-default");
             if let Some(pdir) = proton_dir {
-                if let Some(name) = pdir.file_name().and_then(|s| s.to_str()) {
-                    cmd.env("PROTONPATH", name);
-                } else {
-                    cmd.env("PROTONPATH", pdir);
-                }
+                cmd.env("PROTONPATH", pdir);
             }
             apply_common_envs(&mut cmd, cfg);
             Ok(cmd)
@@ -436,7 +428,7 @@ fn assemble_wrapped_command(wrappers: &[String], base_args: &[String]) -> Comman
 }
 
 fn apply_common_envs(cmd: &mut Command, cfg: &AppConfig) {
-    cmd.env("WINEDLLOVERRIDES", "ncrypt=n,b");
+    cmd.env("WINEDLLOVERRIDES", "ncrypt=n,b;winedbg.exe=d");
     cmd.env("GOLEY_HEADLESS", "1");
     if cfg.show_debug_window {
         cmd.env("GOLEY_ALLOW_WINDOW", "1");
