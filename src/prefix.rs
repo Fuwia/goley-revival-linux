@@ -103,7 +103,15 @@ pub fn select_runner(preferred_id: &str) -> Option<RunnerOption> {
             return Some(found.clone());
         }
     }
-    // Prefer Proton-GE Latest / GE-Proton / Proton-CachyOS via UMU if available
+    // Prefer system Wine: verified to run revival_launcher.exe (Qt6) reliably on
+    // existing prefixes, whereas UMU/Proton may crash on prefix-version mismatch.
+    if let Some(wine) = runners
+        .iter()
+        .find(|r| matches!(r.kind, RunnerKind::Wine { .. }))
+    {
+        return Some(wine.clone());
+    }
+    // Otherwise prefer Proton-GE Latest / GE-Proton via UMU
     if let Some(best) = runners
         .iter()
         .find(|r| r.label.contains("Proton-GE") || r.label.contains("GE-Proton"))

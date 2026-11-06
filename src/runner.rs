@@ -154,18 +154,34 @@ fn run_session_inner(
             prefix.display()
         )));
 
+        let runner_log = crate::config::AppConfig::cache_dir().join("runner.log");
+        let _ = fs::create_dir_all(crate::config::AppConfig::cache_dir());
+        let (out, err) = match fs::File::create(&runner_log) {
+            Ok(f) => match f.try_clone() {
+                Ok(f2) => (Stdio::from(f), Stdio::from(f2)),
+                Err(_) => (Stdio::null(), Stdio::null()),
+            },
+            Err(_) => (Stdio::null(), Stdio::null()),
+        };
         cmd.current_dir(&rev_root)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(out)
+            .stderr(err)
+            .env("WINEDEBUG", "-all");
 
         cmd.spawn()
             .map_err(|e| format!("Çalıştırıcı başlatılamadı: {}", e))?;
     }
 
-    // 3. Tail launcher.log & drive headless QML bridge
+    // 3. Tail launcher.log and drive the headless bridge state machine
     let start_wait = Instant::now();
     let mut phase_ready = existing_launcher_pid.is_some();
+    let mut ready_since: Option<Instant> = if existing_launcher_pid.is_some() {
+        Some(Instant::now())
+    } else {
+        None
+    };
+    let mut seen_launcher = existing_launcher_pid.is_some();
     let mut no_stored_session = false;
     let mut login_sent = existing_launcher_pid.is_some() && creds.is_some();
     let mut play_sent_at: Option<Instant> = if existing_launcher_pid.is_some() && creds.is_none() {
@@ -174,16 +190,12 @@ fn run_session_inner(
         None
     };
     let mut ticket_requested = false;
-    let mut ready_since: Option<Instant> = if phase_ready { Some(Instant::now()) } else { None };
 
     loop {
-        if start_wait.elapsed() > Duration::from_secs(150) {
-            return Err("Başlatma zaman aşımına uğradı (150 sn). Canlı Günlükler'i kontrol edin.".to_string());
-        }
-
         // Check if BinaryTrU.exe is already running!
         let (game_pid, launcher_pid) = find_running_pids();
         if let Some(gpid) = game_pid {
+            let _ = send_bridge_command(prefix, "SLEEP_UI\n");
             let _ = tx.send_blocking(RunnerEvent::LogLine(format!(
                 "[goley-revival-linux] BinaryTrU.exe çalışıyor (PID {}).",
                 gpid
@@ -193,10 +205,24 @@ fn run_session_inner(
             return Ok(());
         }
 
-        // If launcher exited unexpectedly after >8s without starting game
-        if start_wait.elapsed() > Duration::from_secs(12) && phase_ready && launcher_pid.is_none() {
-            let _ = tx.send_blocking(RunnerEvent::GameExited);
-            return Ok(());
+        if launcher_pid.is_some() {
+            seen_launcher = true;
+        }
+
+        // Runner died before revival_launcher.exe ever came up (e.g. Proton crash)
+        if !seen_launcher && start_wait.elapsed() > Duration::from_secs(20) {
+            return Err(format!(
+                "Resmi başlatıcı açılamadı (uyumluluk katmanı erken sonlandı). Ayarlar'dan 'Sistem Wine' katmanını seçip tekrar deneyin. Ayrıntı: {}",
+                crate::config::AppConfig::cache_dir().join("runner.log").display()
+            ));
+        }
+
+        // Timeout check (allow 150s in case launcher downloads small patches)
+        if start_wait.elapsed() > Duration::from_secs(150) {
+            return Err(
+                "Başlatma zaman aşımına uğradı (150 sn). Günlük kayıtlarını kontrol edin."
+                    .to_string(),
+            );
         }
 
         // Read newly appended lines from launcher.log
@@ -240,11 +266,6 @@ fn run_session_inner(
                         } else if trimmed.contains("-> Ready") {
                             phase_ready = true;
                             ready_since = Some(Instant::now());
-                            let _ = tx.send_blocking(RunnerEvent::Status {
-                                headline: "Goley Revival Hazır".to_string(),
-                                detail: "Resmi başlatıcı açıldı · Oyuna girmek için 'OYNA' butonuna tıklayın".to_string(),
-                                pulsing: false,
-                            });
                         } else if let Some(idx) = trimmed.find("AuthClient: login failed ->") {
                             let reason = trimmed[idx + "AuthClient: login failed ->".len()..]
                                 .trim()
@@ -261,8 +282,8 @@ fn run_session_inner(
                                 .unwrap_or_else(|| "Oyuncu".to_string());
                             let _ = tx.send_blocking(RunnerEvent::LoginSucceeded { username: uname });
                             let _ = tx.send_blocking(RunnerEvent::Status {
-                                headline: "Giriş başarılı! Oyun başlatılıyor...".to_string(),
-                                detail: "120 saniyelik tek kullanımlık oyun bileti alınıyor".to_string(),
+                                headline: "Giriş başarılı!".to_string(),
+                                detail: "Oyun oturumu başlatılıyor...".to_string(),
                                 pulsing: true,
                             });
                             std::thread::sleep(Duration::from_millis(350));
@@ -293,11 +314,9 @@ fn run_session_inner(
             }
         }
 
-        // Act once phase_ready is reached
+        // Act on Ready phase
         if phase_ready {
-            let elapsed_ready = ready_since
-                .map(|t| t.elapsed())
-                .unwrap_or(Duration::ZERO);
+            let elapsed_ready = ready_since.map(|t| t.elapsed()).unwrap_or_default();
 
             if no_stored_session {
                 if let Some(ref c) = creds {
@@ -305,7 +324,7 @@ fn run_session_inner(
                         login_sent = true;
                         let _ = tx.send_blocking(RunnerEvent::Status {
                             headline: "Hesaba giriş yapılıyor...".to_string(),
-                            detail: format!("{} hesabı doğrulanıyor", c.username),
+                            detail: format!("{} doğrulanıyor", c.username),
                             pulsing: true,
                         });
                         send_bridge_command(
@@ -318,16 +337,15 @@ fn run_session_inner(
                     return Ok(());
                 }
             } else if play_sent_at.is_none() && elapsed_ready >= Duration::from_millis(650) {
-                // Stored session is valid -> click StartButton!
                 let _ = tx.send_blocking(RunnerEvent::Status {
-                    headline: "Oturum doğrulandı, oyun başlatılıyor...".to_string(),
-                    detail: "Sunucudan oyun bileti isteniyor".to_string(),
+                    headline: "Oyun oturumu başlatılıyor...".to_string(),
+                    detail: "Gizli köprü üzerinden OYNA komutu gönderildi".to_string(),
                     pulsing: true,
                 });
                 send_bridge_command(prefix, "PLAY\n")?;
                 play_sent_at = Some(Instant::now());
             } else if let Some(sent_time) = play_sent_at {
-                // Retry PLAY once if Qt6 window was still fading in during the first click
+                // Retry PLAY if ticket wasn't requested after 2.4s (e.g., session restore just finished)
                 if !ticket_requested && sent_time.elapsed() >= Duration::from_millis(2400) {
                     send_bridge_command(prefix, "PLAY\n")?;
                     play_sent_at = Some(Instant::now());
@@ -335,7 +353,7 @@ fn run_session_inner(
             }
         }
 
-        std::thread::sleep(Duration::from_millis(150));
+        std::thread::sleep(Duration::from_millis(180));
     }
 }
 
@@ -389,8 +407,6 @@ fn build_runner_command(
             cmd.env("GAMEID", "revival");
             cmd.env("FAUGUSID", "revival");
             cmd.env("LOG_DIR", "revival");
-            cmd.env("UMU_CONTAINER_NSENTER", "1");
-            cmd.env("UMU_USE_STEAM", "1");
             if let Some(pdir) = proton_dir {
                 if let Some(name) = pdir.file_name().and_then(|s| s.to_str()) {
                     cmd.env("PROTONPATH", name);
@@ -441,6 +457,12 @@ fn assemble_wrapped_command(wrappers: &[String], base_args: &[String]) -> Comman
 fn apply_common_envs(cmd: &mut Command, cfg: &AppConfig) {
     cmd.env("WINEDLLOVERRIDES", "ncrypt=n,b;winedbg.exe=d");
     cmd.env("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "0");
+    cmd.env("GOLEY_HEADLESS", "1");
+    if cfg.show_debug_window {
+        cmd.env("GOLEY_ALLOW_WINDOW", "1");
+    } else {
+        cmd.env_remove("GOLEY_ALLOW_WINDOW");
+    }
 
     for token in cfg.extra_env.split_whitespace() {
         if let Some((k, v)) = token.split_once('=') {
