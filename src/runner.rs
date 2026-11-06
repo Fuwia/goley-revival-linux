@@ -455,7 +455,10 @@ fn assemble_wrapped_command(wrappers: &[String], base_args: &[String]) -> Comman
 }
 
 fn apply_common_envs(cmd: &mut Command, cfg: &AppConfig) {
-    cmd.env("WINEDLLOVERRIDES", "ncrypt=n,b;winedbg.exe=d");
+    cmd.env(
+        "WINEDLLOVERRIDES",
+        "ncrypt=n,b;d3d9,d3dx9_42,d3dx9_31,d3dcompiler_42,d3d10core,d3d11,dxgi=n,b;winedbg.exe=d",
+    );
     cmd.env("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "0");
     cmd.env("GOLEY_HEADLESS", "1");
     if cfg.show_debug_window {
