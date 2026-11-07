@@ -2,7 +2,7 @@
 
 <img src="assets/io.github.fuwia.GoleyRevivalLinux.svg" width="112" height="112" alt="Revival Linux Icon" />
 
-# Goley Revival — Linux Başlatıcısı :D
+# Goley Revival Linux Başlatıcısı :D
 
 **Rust + GTK4 + Libadwaita** ile sıfırdan geliştirilmiş doğal (native) açık kaynak Goley Revival Linux başlatıcısı.
 
