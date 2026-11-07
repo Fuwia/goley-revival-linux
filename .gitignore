@@ -1,11 +1,15 @@
 /target/
 /ncrypt-shim/dist/
+/dist/
 *.dll
 *.o
 *.so
 *.AppImage
 *.tar.gz
 *.pkg.tar.zst
+*.deb
+*.rpm
+*.sha256
 /packaging/arch/pkg/
 /packaging/arch/src/
 .DS_Store

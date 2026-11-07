@@ -2,14 +2,16 @@
 
 <img src="assets/io.github.fuwia.GoleyRevivalLinux.svg" width="112" height="112" alt="Revival Linux Icon" />
 
-# Goley Revival Linux Başlatıcısı :D
+# Goley Revival Linux — Kurulum Rehberi ve Başlatıcı ⚽🐧
 
-**Rust + GTK4 + Libadwaita** ile sıfırdan geliştirilmiş doğal (native) açık kaynak Goley Revival Linux başlatıcısı.
+**Goley Revival'ı Linux ve Steam Deck üzerinde oynamak isteyen oyuncular için geliştirilmiş açık kaynaklı doğal (native) başlatıcı.**
+
+Windows CNG `ncrypt.dll` (`ECDSA_P256`) oturum köprüsü, DXVK Direct3D 9 optimizasyonu ve sıfır arka plan CPU kullanımı ile Goley Revival'ı Ubuntu, Debian, Arch Linux, CachyOS, Fedora, Linux Mint ve Steam Deck üzerinde sorunsuz, tek tıkla kurup oynamanızı sağlar.
 
 [![Rust](https://img.shields.io/badge/Dil-Rust%20%2B%20C-orange?style=flat-square&logo=rust)](Cargo.toml)
 [![GTK4 + Libadwaita](https://img.shields.io/badge/Aray%C3%BCz-GTK4%20%2B%20Libadwaita-4a86cf?style=flat-square&logo=gnome)](https://gnome.pages.gitlab.gnome.org/libadwaita/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20x86__64-2ec27e?style=flat-square&logo=linux)](#kurulum-rehberi-t%C3%BCm-linux-da%C4%9F%C4%B1t%C4%B1mlar%C4%B1)
-[![Sürüm](https://img.shields.io/badge/S%C3%BCr%C3%BCm-v0.1.2-blueviolet?style=flat-square)](https://github.com/Fuwia/goley-revival-linux/releases)
+[![Sürüm](https://img.shields.io/badge/S%C3%BCr%C3%BCm-v0.1.4-blueviolet?style=flat-square)](https://github.com/Fuwia/goley-revival-linux/releases)
 [![Lisans](https://img.shields.io/badge/Lisans-GPL--3.0-blue?style=flat-square)](LICENSE)
 
 <br/><br/>
@@ -76,7 +78,19 @@ Goley Revival'ı (`playrevival.co`) Linux üzerinde Wine veya Proton ile doğrud
 
 ## 📦 Kurulum Rehberi (Tüm Linux Dağıtımları)
 
-Oyunun sorunsuz çalışması için sisteminizde önce bir **uyumluluk katmanı** (**UMU-Launcher + Proton-GE** *(önerilen)* veya **Wine**) kurulu olmalıdır. Aşağıda kendi dağıtımınıza ait bölümü takip ederek hem gerekli sistem paketlerini hem de `goley-revival-linux` başlatıcısını dakikalar içinde kurabilirsiniz.
+Oyunun sorunsuz çalışması için sisteminizde önce bir **uyumluluk katmanı** (**Wine** veya **UMU-Launcher + Proton-GE**) kurulu olmalıdır. Aşağıdaki tablodan dağıtımınıza uygun hazır ikili paketi indirebilir veya tek komutla doğrudan kurabilirsiniz.
+
+---
+
+### 📥 Hazır Paket İndirmeleri (v0.1.4 Releases)
+
+| Dağıtım / Platform | Paket Formatı | Kurulum Yöntemi | Doğrudan İndirme |
+| :--- | :--- | :--- | :--- |
+| 🚀 **Tüm Linux Dağıtımları & Steam Deck** | **AppImage** *(Taşınabilir Tek Dosya)* | `chmod +x *.AppImage && ./*.AppImage` | [İndir (.AppImage)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-x86_64.AppImage) |
+| 🐧 **Ubuntu / Debian / Linux Mint / Pop!_OS** | **.deb** | `sudo apt install ./goley-revival-linux_*.deb` | [İndir (.deb)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux_0.1.4_amd64.deb) |
+| 🏹 **Arch Linux / CachyOS / Manjaro** | **.pkg.tar.zst** *(Pacman)* | `sudo pacman -U goley-revival-linux-*.pkg.tar.zst` | [İndir (.pkg.tar.zst)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-0.1.4-1-x86_64.pkg.tar.zst) |
+| 🎩 **Fedora / Nobara / openSUSE / RHEL** | **.rpm** | `sudo dnf install ./goley-revival-linux-*.rpm` | [İndir (.rpm)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-0.1.4-1.x86_64.rpm) |
+| 📦 **Taşınabilir Arşiv (Tüm Dağıtımlar)** | **.tar.gz** + `install.sh` | `tar -xzf *.tar.gz && ./install.sh` | [İndir (.tar.gz)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-x86_64.tar.gz) |
 
 ---
 
@@ -239,38 +253,62 @@ Steam Deck'te dosya sistemi salt-okunur (immutable) olduğu için hiçbir sistem
 
 ---
 
-## 🔧 Sorun Giderme (SSS)
+## 🔧 Sıkça Sorulan Sorular ve Sorun Giderme (Goley Revival Linux)
 
-<details>
-<summary><b>"Çalıştırıcı bulunamadı (Wine/UMU kurun)" uyarısı alıyorum</b></summary>
+<details open>
+<summary><b>1. "Sunucuya ulaşılamadı (0x80090029)" ve Giriş Hatası Kesin Çözümü</b></summary>
 
-Sisteminizde `umu-run` veya `wine` kurulu olduğundan emin olun. En iyi deneyim için **ProtonUp-Qt** ile bir **GE-Proton** sürümü indirmeniz ve dağıtımınızın paket yöneticisinden `umu-launcher` kurmanız önerilir.
+Windows CNG `ncrypt.dll` kütüphanesinin `ECDSA_P256` işlevi Wine/Proton üzerinde varsayılan olarak desteklenmez ve Goley sunucusuyla el sıkışamaz (`NTE_NOT_SUPPORTED 0x80090029`).
+`goley-revival-linux` bu hatayı kökten çözen açık kaynaklı x64 ve x86 `ncrypt.dll` shim köprülerini otomatik kurar. Eğer bu hatayı almaya devam ederseniz:
+- Sağ üstteki ⚙️ **Ayarlar -> Bakım ve Onarım** sekmesine gidin.
+- **"Linux Uyumluluk Köprüleri -> Yeniden Kur"** butonuna tıklayın.
+- Bu işlem hem 64-bit hem 32-bit `ncrypt.dll` köprülerini yeniler ve Wine önekinize `WINEDLLOVERRIDES="ncrypt=n,b"` kuralını uygular.
+</details>
+
+<details open>
+<summary><b>2. "Oyun başlıyor. Lütfen bekleyiniz." Splash Ekranında Kalma veya Çökme Çözümü (DXVK & D3D9)</b></summary>
+
+Goley Revival'ın `BinaryTrU.exe` istemcisi `D3D9`, `D3DX9_42` ve `D3DCompiler_42` DirectX kütüphanelerini çağırarak shader derlemesi yapar. Wine'ın yerleşik `wined3d` motoru bu shaderları (`Shader.VLD`) derleyemez ve `BugTrap.dll` çökmesine veya splash ekranında donmaya yol açar.
+- **v0.1.4 ile Çözüldü:** Başlatıcımız artık DXVK Direct3D 9 ve yerel DLL geçersiz kılmalarını (`ncrypt=n,b;d3d9,d3dx9_42,d3dx9_31,d3dcompiler_42,d3d10core,d3d11,dxgi=n,b`) otomatik devreye sokar.
+- Eğer oyununuz yine de açılmazsa sağ üstteki ⚙️ **Ayarlar -> Bakım ve Onarım -> NVIDIA PhysX Runtime Kurulumu** butonuna tıklayarak eksik PhysX motorunu yükleyin.
 </details>
 
 <details>
-<summary><b>Daha önce aldığım "Sunucuya ulaşılamadı (0x80090029)" hatası devam ederse ne yapmalıyım?</b></summary>
+<summary><b>3. Steam Deck ve SteamOS Gaming Mode Kurulumu</b></summary>
 
-Sağ üstteki ⚙️ **Ayarlar -> Bakım ve Onarım** sekmesinden **"Linux Uyumluluk Köprüleri -> Yeniden Kur"** butonuna tıklayın. Bu işlem hem 64-bit hem 32-bit `ncrypt.dll` dosyalarını ve `WINEDLLOVERRIDES="ncrypt=n,b"` ayarını otomatik olarak yeniler.
+Steam Deck'in salt-okunur dosya sistemini bozmadan tek tıkla çalıştırabilirsiniz:
+- Masaüstü Modu'nda (Desktop Mode) yukarıdaki tablodan **AppImage** dosyasını indirin.
+- İndirdiğiniz `.AppImage` dosyasına sağ tıklayıp *Özellikler -> İzinler -> Çalıştırılabilir* yapın ve **"Add to Steam" (Steam'e Ekle)** deyin.
+- Gaming Mode'a döndüğünüzde Goley Revival'ı doğrudan konsol arayüzünden başlatabilirsiniz. Başlatıcı arka planda Proton-GE ve UMU-Run ile tam entegre çalışır.
 </details>
 
 <details>
-<summary><b>Oyun içinde yönlendirme veya ok tuşları nasıl kullanılır?</b></summary>
+<summary><b>4. Klavye Ok Tuşları ve Gamepad Yönlendirmesi (WASD)</b></summary>
 
-Goley Revival'da maç esnasında yönlendirme varsayılan olarak **W-A-S-D** tuşları veya oyun kolu (gamepad) ile sorunsuz çalışır. Wine / XWayland ortamında bazı klavye düzenlerinde ok tuşları yerine **W-A-S-D** veya Gamepad kullanımı en kararlı ve akıcı deneyimi sunar.
+Goley Revival oyun motoru maç esnasında yönlendirme için **W-A-S-D** tuşlarını ve XInput tabanlı oyun kollarını (Xbox, DualShock, DualSense, Steam Controller) tam destekler.
+Linux ve Wayland/XWayland ortamında bazı klavye düzenlerinde ok tuşları yerine **W-A-S-D** veya Gamepad kullanımı en akıcı ve hatasız maç deneyimini sunar.
 </details>
 
 <details>
-<summary><b>Arka planda neler olduğunu nasıl görebilirim?</b></summary>
+<summary><b>5. "Çalıştırıcı bulunamadı (Wine/UMU kurun)" Uyarısı</b></summary>
 
-Üst çubuktaki **Terminal (`>_`)** simgesine tıklayarak **Canlı Günlükler (Logs)** penceresini açabilir veya **Ayarlar -> Geliştirici / Hata Ayıklama** altından *"Arka Plan Windows Başlatıcısını Göster"* anahtarını geçici olarak açabilirsiniz.
+Sisteminizde `umu-run` veya `wine` kurulu olduğundan emin olun:
+- **Arch / CachyOS:** `yay -S umu-launcher proton-ge-custom-bin wine`
+- **Ubuntu / Debian:** `sudo apt install wine wine64 wine32`
+- **Fedora:** `sudo dnf install wine`
+En akıcı deneyim için **ProtonUp-Qt** ile bir **GE-Proton** sürümü indirmeniz önerilir.
 </details>
 
 <details>
-<summary><b>Uygulamayı nasıl kaldırabilirim?</b></summary>
+<summary><b>6. Canlı Hata Günlükleri (Loglar) ve Hata Ayıklama</b></summary>
+
+Üst çubuktaki **Terminal (`>_`)** simgesine tıklayarak **Canlı Günlükler (Logs)** penceresini açabilir veya **Ayarlar -> Geliştirici / Hata Ayıklama** altından *"Arka Plan Windows Başlatıcısını Göster"* seçeneğini açıp arka plandaki tüm işlemleri izleyebilirsiniz.
+</details>
+
+<details>
+<summary><b>7. Uygulamayı Kaldırma</b></summary>
 
 ```bash
-./uninstall.sh
-# veya doğrudan:
 curl -fsSL https://raw.githubusercontent.com/Fuwia/goley-revival-linux/main/uninstall.sh | bash
 ```
 </details>

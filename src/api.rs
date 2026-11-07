@@ -128,7 +128,7 @@ pub enum PatchProgress {
 
 pub fn build_http_client() -> Result<Client, String> {
     Client::builder()
-        .user_agent("goley-revival-linux/0.1.0")
+        .user_agent(concat!("goley-revival-linux/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(12))
         .timeout(Duration::from_secs(180))
         .build()
