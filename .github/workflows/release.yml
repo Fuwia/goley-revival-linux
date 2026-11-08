@@ -30,6 +30,7 @@ jobs:
             gcc-mingw-w64-i686 \
             rpm \
             librsvg2-bin \
+            squashfs-tools \
             zstd
 
       - name: Install Rust stable toolchain

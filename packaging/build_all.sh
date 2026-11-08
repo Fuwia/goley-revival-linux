@@ -73,15 +73,23 @@ chmod +x "$APPDIR/AppRun"
 chmod -R a+rX "$APPDIR"
 
 AI_TOOL_DIR="$(mktemp -d)"
-if [ ! -f "/tmp/appimagetool" ]; then
-    curl -sL https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -o "/tmp/appimagetool"
-    chmod +x "/tmp/appimagetool"
+if command -v mksquashfs >/dev/null 2>&1 && [ -f "$SCRIPT_DIR/packaging/appimage/runtime-x86_64.zst" ]; then
+    mksquashfs "$APPDIR" "$AI_TOOL_DIR/app.squashfs" -root-owned -noappend -comp zstd >/dev/null
+    zstd -d -c "$SCRIPT_DIR/packaging/appimage/runtime-x86_64.zst" > "$DIST_DIR/goley-revival-linux-x86_64.AppImage"
+    cat "$AI_TOOL_DIR/app.squashfs" >> "$DIST_DIR/goley-revival-linux-x86_64.AppImage"
+    chmod +x "$DIST_DIR/goley-revival-linux-x86_64.AppImage"
+else
+    if [ ! -f "/tmp/appimagetool" ] || [ "$(head -c 4 /tmp/appimagetool 2>/dev/null)" != $'\x7fELF' ]; then
+        rm -f "/tmp/appimagetool"
+        curl -fL --retry 5 --retry-delay 2 https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -o "/tmp/appimagetool"
+        chmod +x "/tmp/appimagetool"
+    fi
+    (
+        cd "$AI_TOOL_DIR"
+        /tmp/appimagetool --appimage-extract >/dev/null 2>&1
+        ARCH=x86_64 ./squashfs-root/AppRun "$APPDIR" "$DIST_DIR/goley-revival-linux-x86_64.AppImage"
+    )
 fi
-(
-    cd "$AI_TOOL_DIR"
-    /tmp/appimagetool --appimage-extract >/dev/null 2>&1
-    ARCH=x86_64 ./squashfs-root/AppRun "$APPDIR" "$DIST_DIR/goley-revival-linux-x86_64.AppImage"
-)
 rm -rf "$APPDIR" "$AI_TOOL_DIR"
 
 # 4. Debian / Ubuntu Paketi (.deb)
@@ -154,6 +162,7 @@ depend = gtk4
 depend = libadwaita
 depend = gcc-libs
 depend = glibc
+depend = gnutls
 optdepend = wine: Alternatif uyumluluk katmanı
 optdepend = gnutls: Wine 64-bit HTTPS/TLS ve kriptografi desteği için
 optdepend = lib32-gnutls: 32-bit oyun istemcisi (BinaryTrU.exe) kriptografi desteği için
