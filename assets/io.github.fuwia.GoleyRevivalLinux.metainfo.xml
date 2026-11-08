@@ -16,4 +16,15 @@
   <developer id="io.github.fuwia">
     <name>Fuwia</name>
   </developer>
+  <releases>
+    <release version="0.1.5" date="2026-11-08">
+      <description>
+        <ul>
+          <li>Report launcher exits and show the last expected stage on launch timeouts.</li>
+          <li>Refresh live logs and include Wine/Proton output in copied support reports.</li>
+          <li>Record application, desktop and session information for troubleshooting.</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
 </component>
