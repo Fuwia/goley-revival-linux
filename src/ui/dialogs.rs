@@ -72,9 +72,7 @@ pub fn present_login_dialog<F>(
         user_row.set_text(&u);
     }
 
-    let pass_row = adw::PasswordEntryRow::builder()
-        .title("Şifre")
-        .build();
+    let pass_row = adw::PasswordEntryRow::builder().title("Şifre").build();
 
     let remember_row = adw::SwitchRow::builder()
         .title("Beni Hatırla")
@@ -303,15 +301,38 @@ pub fn present_logs_dialog(
         .build();
     text_view.add_css_class("log-view");
 
-    let combined_text = build_combined_logs(&log_file_path, &session_logs.borrow());
+    let runner_log_path = AppConfig::cache_dir().join("runner.log");
+    let combined_text =
+        build_combined_logs(&log_file_path, &runner_log_path, &session_logs.borrow());
     text_view.buffer().set_text(&combined_text);
+
+    // Keep the support report current while the launcher is still waiting.
+    {
+        let tv_weak = text_view.downgrade();
+        let logs = Rc::clone(session_logs);
+        let launcher_path = log_file_path.clone();
+        let runner_path = runner_log_path.clone();
+        glib::timeout_add_seconds_local(1, move || {
+            let Some(tv) = tv_weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            let text = build_combined_logs(&launcher_path, &runner_path, &logs.borrow());
+            let buf = tv.buffer();
+            if buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str() != text {
+                buf.set_text(&text);
+            }
+            glib::ControlFlow::Continue
+        });
+    }
 
     {
         let tv = text_view.clone();
+        let logs = Rc::clone(session_logs);
+        let launcher_path = log_file_path.clone();
         let toast_ov = toast_overlay.clone();
         copy_btn.connect_clicked(move |_| {
-            let buf = tv.buffer();
-            let text = buf.text(&buf.start_iter(), &buf.end_iter(), false);
+            let text = build_combined_logs(&launcher_path, &runner_log_path, &logs.borrow());
+            tv.buffer().set_text(&text);
             if let Some(display) = gdk::Display::default() {
                 display.clipboard().set_text(&text);
                 toast_ov.add_toast(adw::Toast::new("Günlükler panoya kopyalandı"));
@@ -338,7 +359,7 @@ pub fn present_logs_dialog(
     dialog.present(Some(window));
 }
 
-fn build_combined_logs(log_path: &Path, mem_lines: &[String]) -> String {
+fn build_combined_logs(log_path: &Path, runner_log_path: &Path, mem_lines: &[String]) -> String {
     let mut out = String::new();
     if !mem_lines.is_empty() {
         out.push_str("=== Oturum Kayıtları ===\n");
@@ -348,15 +369,19 @@ fn build_combined_logs(log_path: &Path, mem_lines: &[String]) -> String {
         }
         out.push('\n');
     }
-    if let Ok(disk_log) = fs::read_to_string(log_path) {
-        out.push_str(&format!("=== {} ===\n", log_path.display()));
-        let lines: Vec<&str> = disk_log.lines().collect();
-        let start = lines.len().saturating_sub(250);
-        for l in &lines[start..] {
-            out.push_str(l);
+    for path in [log_path, runner_log_path] {
+        if let Ok(disk_log) = fs::read_to_string(path) {
+            out.push_str(&format!("=== {} ===\n", path.display()));
+            let lines: Vec<&str> = disk_log.lines().collect();
+            let start = lines.len().saturating_sub(250);
+            for l in &lines[start..] {
+                out.push_str(l);
+                out.push('\n');
+            }
             out.push('\n');
         }
-    } else if out.is_empty() {
+    }
+    if out.is_empty() {
         out.push_str("Henüz günlük kaydı oluşmadı.");
     }
     out
@@ -460,7 +485,9 @@ pub fn present_preferences_dialog<FRepair, FVerify>(
         let row_clone = prefix_row.clone();
         let notify_cb = Rc::clone(&on_config_changed);
         btn_pick_pfx.connect_clicked(move |_| {
-            let Some(win) = win_weak.upgrade() else { return };
+            let Some(win) = win_weak.upgrade() else {
+                return;
+            };
             let file_dlg = gtk::FileDialog::builder()
                 .title("Wine Prefix Klasörünü Seçin")
                 .build();
@@ -634,26 +661,26 @@ pub fn present_preferences_dialog<FRepair, FVerify>(
     {
         let cfg = Rc::clone(config_rc);
         let toast_ov = toast_overlay.clone();
-        btn_shim.connect_clicked(move |_| {
-            match install_ncrypt_shims(&cfg.borrow().prefix_path) {
+        btn_shim.connect_clicked(
+            move |_| match install_ncrypt_shims(&cfg.borrow().prefix_path) {
                 Ok(_) => {
                     on_repair_shims();
-                    toast_ov.add_toast(adw::Toast::new(
-                        "ncrypt.dll köprüsü başarıyla kuruldu",
-                    ));
+                    toast_ov.add_toast(adw::Toast::new("ncrypt.dll köprüsü başarıyla kuruldu"));
                 }
                 Err(e) => {
                     toast_ov.add_toast(adw::Toast::new(&format!("Hata: {}", e)));
                 }
-            }
-        });
+            },
+        );
     }
     row_shim.add_suffix(&btn_shim);
     group_fixes.add(&row_shim);
 
     let row_verify = adw::ActionRow::builder()
         .title("Oyun Dosyalarını Doğrula (SHA-256)")
-        .subtitle("Tüm 168 oyun dosyasını resmi sunucu özetleriyle karşılaştırır ve eksikleri indirir")
+        .subtitle(
+            "Tüm 168 oyun dosyasını resmi sunucu özetleriyle karşılaştırır ve eksikleri indirir",
+        )
         .build();
     let btn_verify = gtk::Button::with_label("Şimdi Doğrula");
     btn_verify.set_valign(gtk::Align::Center);

@@ -39,6 +39,36 @@ pub enum RunnerEvent {
     GameExited,
 }
 
+// Allow short process handovers without mistaking them for a launcher crash.
+struct LaunchWatch {
+    seen_launcher: bool,
+    missing_since: Option<Instant>,
+    phase: &'static str,
+}
+
+impl LaunchWatch {
+    fn new(existing_launcher: bool, phase: &'static str) -> Self {
+        Self {
+            seen_launcher: existing_launcher,
+            missing_since: None,
+            phase,
+        }
+    }
+
+    fn launcher_exited(&mut self, running: bool, now: Instant) -> bool {
+        if running {
+            self.seen_launcher = true;
+            self.missing_since = None;
+            return false;
+        }
+        if !self.seen_launcher {
+            return false;
+        }
+        let since = self.missing_since.get_or_insert(now);
+        now.duration_since(*since) >= Duration::from_secs(3)
+    }
+}
+
 pub fn send_bridge_command(prefix: &Path, cmd: &str) -> Result<(), String> {
     let dir = revival_local_appdata_dir(prefix);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -50,10 +80,14 @@ pub fn stop_running_game(prefix: &Path) {
     let _ = send_bridge_command(prefix, "QUIT\n");
     let (game_pid, launcher_pid) = find_running_pids();
     if let Some(pid) = game_pid {
-        let _ = Command::new("kill").args(["-15", &pid.to_string()]).status();
+        let _ = Command::new("kill")
+            .args(["-15", &pid.to_string()])
+            .status();
     }
     if let Some(pid) = launcher_pid {
-        let _ = Command::new("kill").args(["-15", &pid.to_string()]).status();
+        let _ = Command::new("kill")
+            .args(["-15", &pid.to_string()])
+            .status();
     }
 }
 
@@ -64,6 +98,10 @@ pub fn launch_headless_session(
 ) {
     std::thread::spawn(move || {
         if let Err(err) = run_session_inner(&cfg, creds, &tx) {
+            let _ = tx.send_blocking(RunnerEvent::LogLine(format!(
+                "[goley-revival-linux] Başlatma hatası: {}",
+                err
+            )));
             let _ = tx.send_blocking(RunnerEvent::LaunchError(err));
         }
     });
@@ -77,6 +115,14 @@ fn run_session_inner(
     let prefix = &cfg.prefix_path;
     let rev_root = revival_root_dir(prefix);
     let launcher_exe = rev_root.join("revival_launcher.exe");
+
+    let _ = tx.send_blocking(RunnerEvent::LogLine(format!(
+        "[goley-revival-linux] Sürüm: {} | Mimari: {} | Oturum: {} | Masaüstü: {}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::ARCH,
+        std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "bilinmiyor".into()),
+        std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "bilinmiyor".into()),
+    )));
 
     if !launcher_exe.is_file() {
         return Err(
@@ -100,6 +146,10 @@ fn run_session_inner(
 
     // 2. If revival_launcher.exe is already waiting invisibly in background (e.g. after login prompt)
     if existing_launcher_pid.is_some() {
+        let _ = tx.send_blocking(RunnerEvent::LogLine(format!(
+            "[goley-revival-linux] Mevcut arka plan başlatıcısı kullanılıyor (Prefix: {}). Ayarlardaki katman bu işleme yeniden uygulanmadı.",
+            prefix.display()
+        )));
         if let Ok(meta) = fs::metadata(&log_path) {
             log_offset = meta.len();
         }
@@ -169,8 +219,19 @@ fn run_session_inner(
             .stderr(err)
             .env("WINEDEBUG", "-all");
 
-        cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .map_err(|e| format!("Çalıştırıcı başlatılamadı: {}", e))?;
+        // Reap the wrapper even if this session returns early to request a login.
+        let exit_tx = tx.clone();
+        std::thread::spawn(move || {
+            if let Ok(status) = child.wait() {
+                let _ = exit_tx.send_blocking(RunnerEvent::LogLine(format!(
+                    "[goley-revival-linux] Çalıştırıcı işlemi sonlandı: {}",
+                    status
+                )));
+            }
+        });
     }
 
     // 3. Tail launcher.log and drive the headless bridge state machine
@@ -181,7 +242,16 @@ fn run_session_inner(
     } else {
         None
     };
-    let mut seen_launcher = existing_launcher_pid.is_some();
+    let initial_phase = if existing_launcher_pid.is_some() {
+        if creds.is_some() {
+            "hesaba giriş"
+        } else {
+            "OYNA komutuna yanıt"
+        }
+    } else {
+        "resmi başlatıcının açılması"
+    };
+    let mut watch = LaunchWatch::new(existing_launcher_pid.is_some(), initial_phase);
     let mut no_stored_session = false;
     let mut login_sent = existing_launcher_pid.is_some() && creds.is_some();
     let mut play_sent_at: Option<Instant> = if existing_launcher_pid.is_some() && creds.is_none() {
@@ -205,24 +275,27 @@ fn run_session_inner(
             return Ok(());
         }
 
-        if launcher_pid.is_some() {
-            seen_launcher = true;
+        if watch.launcher_exited(launcher_pid.is_some(), Instant::now()) {
+            return Err(format!(
+                "Resmi başlatıcı oyun açılmadan kapandı. Son aşama: {}. Ayrıntılar için >_ Günlükler penceresini açın.",
+                watch.phase
+            ));
         }
 
-        // Runner died before revival_launcher.exe ever came up (e.g. Proton crash)
-        if !seen_launcher && start_wait.elapsed() > Duration::from_secs(20) {
-            return Err(format!(
-                "Resmi başlatıcı açılamadı (uyumluluk katmanı erken sonlandı). Ayarlar'dan 'Sistem Wine' katmanını seçip tekrar deneyin. Ayrıntı: {}",
-                crate::config::AppConfig::cache_dir().join("runner.log").display()
-            ));
+        // No launcher was observed; the wrapper may have failed or startup may be slow.
+        if !watch.seen_launcher && start_wait.elapsed() > Duration::from_secs(20) {
+            return Err(
+                "Resmi başlatıcı 20 sn içinde algılanamadı. Ayarlar'daki Wine/Proton seçimini kontrol edin; ayrıntılar >_ Günlükler penceresinde."
+                    .to_string()
+            );
         }
 
         // Timeout check (allow 150s in case launcher downloads small patches)
         if start_wait.elapsed() > Duration::from_secs(150) {
-            return Err(
-                "Başlatma zaman aşımına uğradı (150 sn). Günlük kayıtlarını kontrol edin."
-                    .to_string(),
-            );
+            return Err(format!(
+                "Başlatma zaman aşımına uğradı (150 sn). Son aşama: {}. Ayrıntılar için >_ Günlükler penceresini açın.",
+                watch.phase
+            ));
         }
 
         // Read newly appended lines from launcher.log
@@ -248,6 +321,7 @@ fn run_session_inner(
                         let _ = tx.send_blocking(RunnerEvent::LogLine(trimmed.clone()));
 
                         if trimmed.contains("PatchUpdater: checking") {
+                            watch.phase = "oyun dosyalarının denetlenmesi";
                             let _ = tx.send_blocking(RunnerEvent::Status {
                                 headline: "Oyun dosyaları denetleniyor...".to_string(),
                                 detail: "Resmi sunucu manifestosu doğrulanıyor".to_string(),
@@ -256,6 +330,7 @@ fn run_session_inner(
                         } else if trimmed.contains("phase Verifying -> Downloading")
                             || trimmed.contains("game files to download")
                         {
+                            watch.phase = "ek yama dosyalarının indirilmesi";
                             let _ = tx.send_blocking(RunnerEvent::Status {
                                 headline: "Ek yama dosyaları indiriliyor...".to_string(),
                                 detail: trimmed.clone(),
@@ -264,6 +339,7 @@ fn run_session_inner(
                         } else if trimmed.contains("AuthClient: no stored session") {
                             no_stored_session = true;
                         } else if trimmed.contains("-> Ready") {
+                            watch.phase = "başlatıcının hazır olması";
                             phase_ready = true;
                             ready_since = Some(Instant::now());
                         } else if let Some(idx) = trimmed.find("AuthClient: login failed ->") {
@@ -280,7 +356,8 @@ fn run_session_inner(
                                 .as_ref()
                                 .map(|c| c.username.clone())
                                 .unwrap_or_else(|| "Oyuncu".to_string());
-                            let _ = tx.send_blocking(RunnerEvent::LoginSucceeded { username: uname });
+                            let _ =
+                                tx.send_blocking(RunnerEvent::LoginSucceeded { username: uname });
                             let _ = tx.send_blocking(RunnerEvent::Status {
                                 headline: "Giriş başarılı!".to_string(),
                                 detail: "Oyun oturumu başlatılıyor...".to_string(),
@@ -288,12 +365,15 @@ fn run_session_inner(
                             });
                             std::thread::sleep(Duration::from_millis(350));
                             send_bridge_command(prefix, "PLAY\n")?;
+                            watch.phase = "OYNA komutuna yanıt";
                             play_sent_at = Some(Instant::now());
                         } else if trimmed.contains("AuthClient: ticket requested") {
+                            watch.phase = "sunucudan giriş bileti yanıtı";
                             ticket_requested = true;
                             let _ = tx.send_blocking(RunnerEvent::Status {
                                 headline: "Sunucudan giriş bileti alınıyor...".to_string(),
-                                detail: "Oyun istemcisi (BinaryTrU.exe) hazırlanıyor".to_string(),
+                                detail: "Bilet isteği gönderildi, sunucunun yanıtı bekleniyor"
+                                    .to_string(),
                                 pulsing: true,
                             });
                         } else if let Some(idx) = trimmed.find("ticket failed") {
@@ -302,6 +382,7 @@ fn run_session_inner(
                         } else if trimmed.contains("GameLauncher: starting the game")
                             || trimmed.contains("GameLauncher: game started")
                         {
+                            watch.phase = "oyun işleminin (BinaryTrU.exe) açılması";
                             ticket_requested = true;
                             let _ = tx.send_blocking(RunnerEvent::Status {
                                 headline: "Goley Revival açılıyor...".to_string(),
@@ -322,6 +403,7 @@ fn run_session_inner(
                 if let Some(ref c) = creds {
                     if !login_sent && elapsed_ready >= Duration::from_millis(400) {
                         login_sent = true;
+                        watch.phase = "hesaba giriş";
                         let _ = tx.send_blocking(RunnerEvent::Status {
                             headline: "Hesaba giriş yapılıyor...".to_string(),
                             detail: format!("{} doğrulanıyor", c.username),
@@ -343,6 +425,7 @@ fn run_session_inner(
                     pulsing: true,
                 });
                 send_bridge_command(prefix, "PLAY\n")?;
+                watch.phase = "OYNA komutuna yanıt";
                 play_sent_at = Some(Instant::now());
             } else if let Some(sent_time) = play_sent_at {
                 // Retry PLAY if ticket wasn't requested after 2.4s (e.g., session restore just finished)
@@ -365,7 +448,8 @@ fn monitor_until_exit(prefix: &Path, tx: &Sender<RunnerEvent>) {
             // Game closed -> cleanly close hidden revival_launcher.exe too
             let _ = send_bridge_command(prefix, "QUIT\n");
             let _ = tx.send_blocking(RunnerEvent::LogLine(
-                "[goley-revival-linux] Oyun kapandı, arka plan başlatıcısı sonlandırıldı.".to_string(),
+                "[goley-revival-linux] Oyun kapandı, arka plan başlatıcısı sonlandırıldı."
+                    .to_string(),
             ));
             let _ = tx.send_blocking(RunnerEvent::GameExited);
             break;
@@ -473,5 +557,40 @@ fn apply_common_envs(cmd: &mut Command, cfg: &AppConfig) {
                 cmd.env(k, v);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn absent_launcher_during_initial_startup_is_not_a_crash() {
+        let now = Instant::now();
+        let mut watch = LaunchWatch::new(false, "başlatma");
+        assert!(!watch.launcher_exited(false, now));
+        assert!(!watch.launcher_exited(false, now + Duration::from_secs(30)));
+        assert!(!watch.seen_launcher);
+    }
+
+    #[test]
+    fn launcher_disappearance_is_reported_after_grace_period() {
+        let now = Instant::now();
+        let mut watch = LaunchWatch::new(false, "bilet yanıtı");
+        assert!(!watch.launcher_exited(true, now));
+        assert!(!watch.launcher_exited(false, now + Duration::from_secs(1)));
+        assert!(!watch.launcher_exited(false, now + Duration::from_secs(3)));
+        assert!(watch.launcher_exited(false, now + Duration::from_secs(4)));
+    }
+
+    #[test]
+    fn brief_process_handover_resets_the_grace_period() {
+        let now = Instant::now();
+        let mut watch = LaunchWatch::new(true, "giriş");
+        assert!(!watch.launcher_exited(false, now));
+        assert!(!watch.launcher_exited(true, now + Duration::from_secs(2)));
+        assert!(!watch.launcher_exited(false, now + Duration::from_secs(5)));
+        assert!(!watch.launcher_exited(false, now + Duration::from_secs(7)));
+        assert!(watch.launcher_exited(false, now + Duration::from_secs(8)));
     }
 }

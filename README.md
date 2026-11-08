@@ -303,6 +303,10 @@ En akıcı deneyim için **ProtonUp-Qt** ile bir **GE-Proton** sürümü indirme
 <summary><b>6. Canlı Hata Günlükleri (Loglar) ve Hata Ayıklama</b></summary>
 
 Üst çubuktaki **Terminal (`>_`)** simgesine tıklayarak **Canlı Günlükler (Logs)** penceresini açabilir veya **Ayarlar -> Geliştirici / Hata Ayıklama** altından *"Arka Plan Windows Başlatıcısını Göster"* seçeneğini açıp arka plandaki tüm işlemleri izleyebilirsiniz.
+
+Günlük penceresi açıkken kayıtlar yenilenir. **Günlükleri Panoya Kopyala** düğmesi oturum kayıtlarını, resmi başlatıcının `launcher.log` dosyasını ve Wine/Proton çıktısının tutulduğu `runner.log` dosyasını bir araya getirir. Oturum kayıtlarında uygulama sürümü, mimari, masaüstü/oturum türü ve kullanılan uyumluluk katmanı da bulunur. Önceden açık olan bir başlatıcı kullanılıyorsa bu ayrıca belirtilir.
+
+**"Sunucudan giriş bileti alınıyor..." ekranında kalıyorsa:** Bu yazı bilet isteğinin gönderildiğini belirtir; biletin alındığını doğrulamaz. Takılma sırasında günlükleri kopyalayın ve hata bildiriminize ekleyin. Başlatıcı oyun açılmadan kapanırsa veya başlatma 150 saniyeyi aşarsa uygulama son beklenen aşamayı hata mesajında bildirir.
 </details>
 
 <details>
