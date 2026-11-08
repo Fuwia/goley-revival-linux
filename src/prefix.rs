@@ -258,10 +258,25 @@ pub fn install_ncrypt_shims(prefix: &Path) -> Result<(), String> {
     atomic_write_file(&rev_root.join("ncrypt.dll"), NCRYPT64_BYTES)?;
     atomic_write_file(&bin_tr.join("ncrypt.dll"), NCRYPT32_BYTES)?;
 
-    // Clean up stale dinput8.dll if previously installed
-    let stale_di8 = bin_tr.join("dinput8.dll");
-    if stale_di8.is_file() {
-        let _ = fs::remove_file(stale_di8);
+    // Clean up stale dinput8.dll or local bcrypt.dll overrides if previously placed
+    for stale in [
+        bin_tr.join("dinput8.dll"),
+        bin_tr.join("bcrypt.dll"),
+        rev_root.join("bcrypt.dll"),
+    ] {
+        if stale.is_file() || stale.symlink_metadata().is_ok() {
+            let _ = fs::remove_file(stale);
+        }
+    }
+
+    // Repair dangling bcrypt.dll symlinks in system32/syswow64 (e.g. after a Proton removal)
+    for sys_bcrypt in [
+        prefix.join("drive_c/windows/system32/bcrypt.dll"),
+        prefix.join("drive_c/windows/syswow64/bcrypt.dll"),
+    ] {
+        if sys_bcrypt.symlink_metadata().is_ok() && !sys_bcrypt.exists() {
+            let _ = fs::remove_file(sys_bcrypt);
+        }
     }
 
     // Ensure DllOverrides in user.reg if Wine isn't actively locking it
@@ -288,9 +303,16 @@ pub fn ensure_dll_override_in_user_reg(prefix: &Path) -> Result<(), String> {
     let mut dirty = false;
     let mut updated = content.clone();
 
-    // Clean up any stale dinput8 override
-    if updated.contains("\"dinput8\"=") {
-        let lines: Vec<&str> = updated.lines().filter(|l| !l.contains("\"dinput8\"=")).collect();
+    // Clean up any stale dinput8 or native bcrypt override
+    if updated.contains("\"dinput8\"=") || updated.contains("\"bcrypt\"=") || updated.contains("\"*bcrypt\"=") {
+        let lines: Vec<&str> = updated
+            .lines()
+            .filter(|l| {
+                !l.contains("\"dinput8\"=")
+                    && !l.contains("\"bcrypt\"=")
+                    && !l.contains("\"*bcrypt\"=")
+            })
+            .collect();
         updated = lines.join("\n") + "\n";
         dirty = true;
     }

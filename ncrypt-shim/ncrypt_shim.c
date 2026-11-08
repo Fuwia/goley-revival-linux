@@ -34,7 +34,8 @@
 void __main(void) {}
 #endif
 
-#define GOLEY_MAGIC 0x4E435250u /* "NCRP" */
+#define GOLEY_MAGIC 0x4E435250u      /* "NCRP" */
+#define GOLEY_3DES_MAGIC 0x33444553u /* "3DES" */
 
 #ifndef WS_EX_LAYERED
 #define WS_EX_LAYERED 0x00080000L
@@ -53,8 +54,10 @@ void __main(void) {}
 #endif
 
 enum ObjType {
-    OBJ_PROV = 1,
-    OBJ_KEY  = 2
+    OBJ_PROV     = 1,
+    OBJ_KEY      = 2,
+    OBJ_3DES_ALG = 3,
+    OBJ_3DES_KEY = 4
 };
 
 typedef struct {
@@ -708,11 +711,363 @@ static DWORD WINAPI headless_bridge_thread(LPVOID param) {
     return 0;
 }
 
+/* =========================================================================
+ * Self-Contained 3DES-CBC Fallback & IAT Hook for `revival_launcher.exe`
+ *
+ * Why this exists:
+ *   `revival_launcher.exe` (GameLauncher::startGame) encrypts the `NMRunEnv_ENUM`
+ *   launch token using `bcrypt.dll` (`BCryptOpenAlgorithmProvider(L"3DES")`,
+ *   `BCryptSetProperty(L"ChainingMode", L"ChainingModeCBC")`,
+ *   `BCryptGenerateSymmetricKey`, `BCryptEncrypt`).
+ *   On Wine/Proton setups where `libgnutls.so.30` is missing (optional dep on
+ *   Arch Linux), `bcrypt.so` mismatches the prefix `bcrypt.dll`, or system
+ *   GnuTLS priority disables legacy 3DES, `BCrypt` fails and causes:
+ *     "GameLauncher: cannot start the game, preparing the launch data failed"
+ *   By hooking `revival_launcher.exe`'s IAT for `bcrypt.dll` and handling
+ *   `3DES` in pure C, launch data preparation succeeds on all Wine/Proton builds.
+ * ========================================================================= */
+
+#ifdef _WIN64
+
+typedef unsigned char u8;
+typedef unsigned int u32;
+typedef unsigned long long u64;
+
+typedef struct {
+    DWORD magic;
+    DWORD type;
+    u64 k1[16];
+    u64 k2[16];
+    u64 k3[16];
+} Goley3DesObject;
+
+static const u8 DES_IP[64] = {
+    58,50,42,34,26,18,10, 2, 60,52,44,36,28,20,12, 4,
+    62,54,46,38,30,22,14, 6, 64,56,48,40,32,24,16, 8,
+    57,49,41,33,25,17, 9, 1, 59,51,43,35,27,19,11, 3,
+    61,53,45,37,29,21,13, 5, 63,55,47,39,31,23,15, 7
+};
+static const u8 DES_FP[64] = {
+    40, 8,48,16,56,24,64,32, 39, 7,47,15,55,23,63,31,
+    38, 6,46,14,54,22,62,30, 37, 5,45,13,53,21,61,29,
+    36, 4,44,12,52,20,60,28, 35, 3,43,11,51,19,59,27,
+    34, 2,42,10,50,18,58,26, 33, 1,41, 9,49,17,57,25
+};
+static const u8 DES_PC1[56] = {
+    57,49,41,33,25,17, 9, 1,58,50,42,34,26,18,
+    10, 2,59,51,43,35,27,19,11, 3,60,52,44,36,
+    63,55,47,39,31,23,15, 7,62,54,46,38,30,22,
+    14, 6,61,53,45,37,29,21,13, 5,28,20,12, 4
+};
+static const u8 DES_PC2[48] = {
+    14,17,11,24, 1, 5, 3,28,15, 6,21,10,
+    23,19,12, 4,26, 8,16, 7,27,20,13, 2,
+    41,52,31,37,47,55,30,40,51,45,33,48,
+    44,49,39,56,34,53,46,42,50,36,29,32
+};
+static const u8 DES_SHIFTS[16] = {1,1,2,2,2,2,2,2,1,2,2,2,2,2,2,1};
+static const u8 DES_E[48] = {
+    32, 1, 2, 3, 4, 5, 4, 5, 6, 7, 8, 9,
+     8, 9,10,11,12,13,12,13,14,15,16,17,
+    16,17,18,19,20,21,20,21,22,23,24,25,
+    24,25,26,27,28,29,28,29,30,31,32, 1
+};
+static const u8 DES_P[32] = {
+    16, 7,20,21,29,12,28,17, 1,15,23,26, 5,18,31,10,
+     2, 8,24,14,32,27, 3, 9,19,13,30, 6,22,11, 4,25
+};
+static const u8 DES_S[8][64] = {
+    {14, 4,13, 1, 2,15,11, 8, 3,10, 6,12, 5, 9, 0, 7, 0,15, 7, 4,14, 2,13, 1,10, 6,12,11, 9, 5, 3, 8, 4, 1,14, 8,13, 6, 2,11,15,12, 9, 7, 3,10, 5, 0,15,12, 8, 2, 4, 9, 1, 7, 5,11, 3,14,10, 0, 6,13},
+    {15, 1, 8,14, 6,11, 3, 4, 9, 7, 2,13,12, 0, 5,10, 3,13, 4, 7,15, 2, 8,14,12, 0, 1,10, 6, 9,11, 5, 0,14, 7,11,10, 4,13, 1, 5, 8,12, 6, 9, 3, 2,15,13, 8,10, 1, 3,15, 4, 2,11, 6, 7,12, 0, 5,14, 9},
+    {10, 0, 9,14, 6, 3,15, 5, 1,13, 12, 7,11, 4, 2, 8,13, 7, 0, 9, 3, 4, 6,10, 2, 8, 5,14,12,11,15, 1,13, 6, 4, 9, 8,15, 3, 0,11, 1, 2,12, 5,10,14, 7, 1,10,13, 0, 6, 9, 8, 7, 4,15,14, 3,11, 5, 2,12},
+    { 7,13,14, 3, 0, 6, 9,10, 1, 2, 8, 5,11,12, 4,15,13, 8,11, 5, 6,15, 0, 3, 4, 7, 2,12, 1,10,14, 9,10, 6, 9, 0,12,11, 7,13,15, 1, 3,14, 5, 2, 8, 4, 3,15, 0, 6,10, 1,13, 8, 9, 4, 5,11,12, 7, 2,14},
+    { 2,12, 4, 1, 7,10,11, 6, 8, 5, 3,15,13, 0,14, 9,14,11, 2,12, 4, 7,13, 1, 5, 0,15,10, 3, 9, 8, 6, 4, 2, 1,11,10,13, 7, 8,15, 9,12, 5, 6, 3, 0,14,11, 8,12, 7, 1,14, 2,13, 6,15, 0, 9,10, 4, 5, 3},
+    {12, 1,10,15, 9, 2, 6, 8, 0,13, 3, 4,14, 7, 5,11,10,15, 4, 2, 7,12, 9, 5, 6, 1,13,14, 0,11, 3, 8, 9,14,15, 5, 2, 8,12, 3, 7, 0, 4,10, 1,13,11, 6, 4, 3, 2,12, 9, 5,15,10,11,14, 1, 7, 6, 0, 8,13},
+    { 4,11, 2,14,15, 0, 8,13, 3,12, 9, 7, 5,10, 6, 1,13, 0,11, 7, 4, 9, 1,10,14, 3, 5,12, 2,15, 8, 6, 1, 4,11,13,12, 3, 7,14,10,15, 6, 8, 0, 5, 9, 2, 6,11,13, 8, 1, 4,10, 7, 9, 5, 0,15,14, 2, 3,12},
+    {13, 2, 8, 4, 6,15,11, 1,10, 9, 3,14, 5, 0,12, 7, 1,15,13, 8,10, 3, 7, 4,12, 5, 6,11, 0,14, 9, 2, 7,11, 4, 1, 9,12,14, 2, 0, 6,10,13,15, 3, 5, 8, 2, 1,14, 7, 4,10, 8,13,15,12, 9, 0, 3, 5, 6,11}
+};
+
+static u64 des_permute(u64 in, const u8 *table, int n_in, int n_out) {
+    u64 out = 0;
+    int i;
+    for (i = 0; i < n_out; i++) {
+        out = (out << 1) | ((in >> (n_in - table[i])) & 1ULL);
+    }
+    return out;
+}
+
+static void des_key_schedule(const u8 key8[8], u64 subkeys[16]) {
+    u64 k = 0;
+    u64 pc1;
+    u32 c, d;
+    int i;
+    for (i = 0; i < 8; i++) k = (k << 8) | key8[i];
+    pc1 = des_permute(k, DES_PC1, 64, 56);
+    c = (u32)((pc1 >> 28) & 0x0FFFFFFFULL);
+    d = (u32)(pc1 & 0x0FFFFFFFULL);
+    for (i = 0; i < 16; i++) {
+        int s = DES_SHIFTS[i];
+        u64 cd;
+        c = ((c << s) | (c >> (28 - s))) & 0x0FFFFFFFULL;
+        d = ((d << s) | (d >> (28 - s))) & 0x0FFFFFFFULL;
+        cd = (((u64)c) << 28) | (u64)d;
+        subkeys[i] = des_permute(cd, DES_PC2, 56, 48);
+    }
+}
+
+static u64 des_crypt_block(u64 block, const u64 subkeys[16], int decrypt) {
+    u64 ip = des_permute(block, DES_IP, 64, 64);
+    u32 l = (u32)(ip >> 32);
+    u32 r = (u32)(ip & 0xFFFFFFFFULL);
+    int round;
+    for (round = 0; round < 16; round++) {
+        u64 k = subkeys[decrypt ? (15 - round) : round];
+        u64 er = des_permute((u64)r, DES_E, 32, 48) ^ k;
+        u32 s_out = 0;
+        u32 f, next_l;
+        int box;
+        for (box = 0; box < 8; box++) {
+            u8 six = (u8)((er >> (42 - 6 * box)) & 0x3F);
+            u8 row = (u8)(((six & 0x20) >> 4) | (six & 0x01));
+            u8 col = (u8)((six >> 1) & 0x0F);
+            s_out = (s_out << 4) | DES_S[box][row * 16 + col];
+        }
+        f = (u32)des_permute((u64)s_out, DES_P, 32, 32);
+        next_l = r;
+        r = l ^ f;
+        l = next_l;
+    }
+    return des_permute((((u64)r) << 32) | (u64)l, DES_FP, 64, 64);
+}
+
+static BOOL str_eq_i_a(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = *a++;
+        char cb = *b++;
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+        if (ca != cb) return FALSE;
+    }
+    return *a == *b;
+}
+
+static BOOL str_eq_a(const char *a, const char *b) {
+    while (*a && *b) {
+        if (*a++ != *b++) return FALSE;
+    }
+    return *a == *b;
+}
+
+static NTSTATUS WINAPI hook_BCryptOpenAlgorithmProvider(
+    BCRYPT_ALG_HANDLE *phAlgorithm,
+    LPCWSTR pszAlgId,
+    LPCWSTR pszImplementation,
+    ULONG dwFlags)
+{
+    if (phAlgorithm && pszAlgId && lstrcmpW(pszAlgId, L"3DES") == 0) {
+        Goley3DesObject *obj = (Goley3DesObject *)HeapAlloc(
+            GetProcessHeap(),
+            HEAP_ZERO_MEMORY,
+            sizeof(Goley3DesObject)
+        );
+        if (!obj) return (NTSTATUS)0xC0000017L; /* STATUS_NO_MEMORY */
+        obj->magic = GOLEY_3DES_MAGIC;
+        obj->type = OBJ_3DES_ALG;
+        *phAlgorithm = (BCRYPT_ALG_HANDLE)obj;
+        return 0;
+    }
+    return BCryptOpenAlgorithmProvider(phAlgorithm, pszAlgId, pszImplementation, dwFlags);
+}
+
+static NTSTATUS WINAPI hook_BCryptSetProperty(
+    BCRYPT_HANDLE hObject,
+    LPCWSTR pszProperty,
+    PUCHAR pbInput,
+    ULONG cbInput,
+    ULONG dwFlags)
+{
+    Goley3DesObject *obj = (Goley3DesObject *)hObject;
+    if (obj && obj->magic == GOLEY_3DES_MAGIC) {
+        return 0;
+    }
+    return BCryptSetProperty(hObject, pszProperty, pbInput, cbInput, dwFlags);
+}
+
+static NTSTATUS WINAPI hook_BCryptGenerateSymmetricKey(
+    BCRYPT_ALG_HANDLE hAlgorithm,
+    BCRYPT_KEY_HANDLE *phKey,
+    PUCHAR pbKeyObject,
+    ULONG cbKeyObject,
+    PUCHAR pbSecret,
+    ULONG cbSecret,
+    ULONG dwFlags)
+{
+    Goley3DesObject *alg = (Goley3DesObject *)hAlgorithm;
+    if (alg && alg->magic == GOLEY_3DES_MAGIC) {
+        Goley3DesObject *keyObj;
+        if (!phKey || !pbSecret || cbSecret < 16) {
+            return (NTSTATUS)0xC000000DL; /* STATUS_INVALID_PARAMETER */
+        }
+        keyObj = (Goley3DesObject *)HeapAlloc(
+            GetProcessHeap(),
+            HEAP_ZERO_MEMORY,
+            sizeof(Goley3DesObject)
+        );
+        if (!keyObj) return (NTSTATUS)0xC0000017L;
+        keyObj->magic = GOLEY_3DES_MAGIC;
+        keyObj->type = OBJ_3DES_KEY;
+        des_key_schedule(pbSecret, keyObj->k1);
+        des_key_schedule(pbSecret + 8, keyObj->k2);
+        des_key_schedule((cbSecret >= 24) ? (pbSecret + 16) : pbSecret, keyObj->k3);
+        *phKey = (BCRYPT_KEY_HANDLE)keyObj;
+        return 0;
+    }
+    return BCryptGenerateSymmetricKey(hAlgorithm, phKey, pbKeyObject, cbKeyObject, pbSecret, cbSecret, dwFlags);
+}
+
+static NTSTATUS WINAPI hook_BCryptEncrypt(
+    BCRYPT_KEY_HANDLE hKey,
+    PUCHAR pbInput,
+    ULONG cbInput,
+    VOID *pPaddingInfo,
+    PUCHAR pbIV,
+    ULONG cbIV,
+    PUCHAR pbOutput,
+    ULONG cbOutput,
+    ULONG *pcbResult,
+    ULONG dwFlags)
+{
+    Goley3DesObject *keyObj = (Goley3DesObject *)hKey;
+    if (keyObj && keyObj->magic == GOLEY_3DES_MAGIC) {
+        u64 prev = 0;
+        ULONG off;
+        int i;
+        if (keyObj->type != OBJ_3DES_KEY || !pcbResult || (cbInput & 7) != 0) {
+            return (NTSTATUS)0xC000000DL;
+        }
+        *pcbResult = cbInput;
+        if (!pbOutput) return 0;
+        if (cbOutput < cbInput) return (NTSTATUS)0xC0000023L; /* STATUS_BUFFER_TOO_SMALL */
+        if (pbIV && cbIV >= 8) {
+            for (i = 0; i < 8; i++) prev = (prev << 8) | pbIV[i];
+        }
+        for (off = 0; off < cbInput; off += 8) {
+            u64 blk = 0;
+            u64 tmp;
+            for (i = 0; i < 8; i++) blk = (blk << 8) | pbInput[off + i];
+            blk ^= prev;
+            blk = des_crypt_block(blk, keyObj->k1, 0);
+            blk = des_crypt_block(blk, keyObj->k2, 1);
+            blk = des_crypt_block(blk, keyObj->k3, 0);
+            prev = blk;
+            tmp = blk;
+            for (i = 7; i >= 0; i--) {
+                pbOutput[off + i] = (u8)(tmp & 0xFF);
+                tmp >>= 8;
+            }
+        }
+        if (pbIV && cbIV >= 8) {
+            u64 tmp = prev;
+            for (i = 7; i >= 0; i--) {
+                pbIV[i] = (u8)(tmp & 0xFF);
+                tmp >>= 8;
+            }
+        }
+        return 0;
+    }
+    return BCryptEncrypt(hKey, pbInput, cbInput, pPaddingInfo, pbIV, cbIV, pbOutput, cbOutput, pcbResult, dwFlags);
+}
+
+static NTSTATUS WINAPI hook_BCryptDestroyKey(BCRYPT_KEY_HANDLE hKey) {
+    Goley3DesObject *keyObj = (Goley3DesObject *)hKey;
+    if (keyObj && keyObj->magic == GOLEY_3DES_MAGIC) {
+        zero_mem(keyObj, sizeof(Goley3DesObject));
+        HeapFree(GetProcessHeap(), 0, keyObj);
+        return 0;
+    }
+    return BCryptDestroyKey(hKey);
+}
+
+static NTSTATUS WINAPI hook_BCryptCloseAlgorithmProvider(BCRYPT_ALG_HANDLE hAlgorithm, ULONG dwFlags) {
+    Goley3DesObject *alg = (Goley3DesObject *)hAlgorithm;
+    if (alg && alg->magic == GOLEY_3DES_MAGIC) {
+        zero_mem(alg, sizeof(Goley3DesObject));
+        HeapFree(GetProcessHeap(), 0, alg);
+        return 0;
+    }
+    return BCryptCloseAlgorithmProvider(hAlgorithm, dwFlags);
+}
+
+static volatile LONG g_bcryptHooked = 0;
+
+static void patch_iat_slot(void **slot, void *replacement) {
+    DWORD oldProt = 0;
+    if (VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &oldProt)) {
+        *slot = replacement;
+        VirtualProtect(slot, sizeof(void *), oldProt, &oldProt);
+    }
+}
+
+static void install_bcrypt_3des_hooks(void) {
+    HMODULE hExe;
+    BYTE *base;
+    IMAGE_DOS_HEADER *dos;
+    IMAGE_NT_HEADERS *nt;
+    DWORD impRva;
+    IMAGE_IMPORT_DESCRIPTOR *imp;
+
+    if (InterlockedCompareExchange(&g_bcryptHooked, 1, 0) != 0) return;
+
+    hExe = GetModuleHandleW(NULL);
+    if (!hExe) return;
+    base = (BYTE *)hExe;
+    dos = (IMAGE_DOS_HEADER *)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return;
+    nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return;
+
+    impRva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    if (!impRva) return;
+
+    imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + impRva);
+    for (; imp->Name != 0; imp++) {
+        const char *dllName = (const char *)(base + imp->Name);
+        if (str_eq_i_a(dllName, "bcrypt.dll") && imp->OriginalFirstThunk && imp->FirstThunk) {
+            IMAGE_THUNK_DATA *orig = (IMAGE_THUNK_DATA *)(base + imp->OriginalFirstThunk);
+            IMAGE_THUNK_DATA *iat  = (IMAGE_THUNK_DATA *)(base + imp->FirstThunk);
+            for (; orig->u1.AddressOfData != 0; orig++, iat++) {
+                if (!(orig->u1.Ordinal & IMAGE_ORDINAL_FLAG)) {
+                    IMAGE_IMPORT_BY_NAME *ibn = (IMAGE_IMPORT_BY_NAME *)(base + orig->u1.AddressOfData);
+                    const char *fn = (const char *)ibn->Name;
+                    if (str_eq_a(fn, "BCryptOpenAlgorithmProvider")) {
+                        patch_iat_slot((void **)&iat->u1.Function, (void *)&hook_BCryptOpenAlgorithmProvider);
+                    } else if (str_eq_a(fn, "BCryptSetProperty")) {
+                        patch_iat_slot((void **)&iat->u1.Function, (void *)&hook_BCryptSetProperty);
+                    } else if (str_eq_a(fn, "BCryptGenerateSymmetricKey")) {
+                        patch_iat_slot((void **)&iat->u1.Function, (void *)&hook_BCryptGenerateSymmetricKey);
+                    } else if (str_eq_a(fn, "BCryptEncrypt")) {
+                        patch_iat_slot((void **)&iat->u1.Function, (void *)&hook_BCryptEncrypt);
+                    } else if (str_eq_a(fn, "BCryptDestroyKey")) {
+                        patch_iat_slot((void **)&iat->u1.Function, (void *)&hook_BCryptDestroyKey);
+                    } else if (str_eq_a(fn, "BCryptCloseAlgorithmProvider")) {
+                        patch_iat_slot((void **)&iat->u1.Function, (void *)&hook_BCryptCloseAlgorithmProvider);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#else
+static void install_bcrypt_3des_hooks(void) {}
+#endif
+
 static volatile LONG g_bridgeStarted = 0;
 
 static void ensure_bridge_thread_started(void) {
     WCHAR headless[16];
     WCHAR exePath[MAX_PATH];
+    install_bcrypt_3des_hooks();
     if (InterlockedCompareExchange(&g_bridgeStarted, 1, 0) != 0) return;
 
     zero_mem(headless, sizeof(headless));

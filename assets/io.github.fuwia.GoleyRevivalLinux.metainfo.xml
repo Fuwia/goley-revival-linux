@@ -17,6 +17,15 @@
     <name>Fuwia</name>
   </developer>
   <releases>
+    <release version="0.1.6" date="2026-11-08">
+      <description>
+        <ul>
+          <li>Fix "GameLauncher: preparing the launch data failed" by embedding a self-contained 3DES-CBC engine and bcrypt.dll IAT hook in ncrypt.dll.</li>
+          <li>Clean up stale bcrypt.dll overrides and broken symlinks in Wine/Proton prefixes.</li>
+          <li>Detect game launch failures immediately instead of waiting for the 150s timeout, and fix expired session restore handling.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.5" date="2026-11-08">
       <description>
         <ul>

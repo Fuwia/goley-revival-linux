@@ -11,7 +11,7 @@ Windows CNG `ncrypt.dll` (`ECDSA_P256`) oturum köprüsü, DXVK Direct3D 9 optim
 [![Rust](https://img.shields.io/badge/Dil-Rust%20%2B%20C-orange?style=flat-square&logo=rust)](Cargo.toml)
 [![GTK4 + Libadwaita](https://img.shields.io/badge/Aray%C3%BCz-GTK4%20%2B%20Libadwaita-4a86cf?style=flat-square&logo=gnome)](https://gnome.pages.gitlab.gnome.org/libadwaita/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20x86__64-2ec27e?style=flat-square&logo=linux)](#kurulum-rehberi-t%C3%BCm-linux-da%C4%9F%C4%B1t%C4%B1mlar%C4%B1)
-[![Sürüm](https://img.shields.io/badge/S%C3%BCr%C3%BCm-v0.1.5-blueviolet?style=flat-square)](https://github.com/Fuwia/goley-revival-linux/releases)
+[![Sürüm](https://img.shields.io/badge/S%C3%BCr%C3%BCm-v0.1.6-blueviolet?style=flat-square)](https://github.com/Fuwia/goley-revival-linux/releases)
 [![Lisans](https://img.shields.io/badge/Lisans-GPL--3.0-blue?style=flat-square)](LICENSE)
 
 <br/><br/>
@@ -82,14 +82,14 @@ Oyunun sorunsuz çalışması için sisteminizde önce bir **uyumluluk katmanı*
 
 ---
 
-### 📥 Hazır Paket İndirmeleri (v0.1.5 Releases)
+### 📥 Hazır Paket İndirmeleri (v0.1.6 Releases)
 
 | Dağıtım / Platform | Paket Formatı | Kurulum Yöntemi | Doğrudan İndirme |
 | :--- | :--- | :--- | :--- |
 | 🚀 **Tüm Linux Dağıtımları & Steam Deck** | **AppImage** *(Taşınabilir Tek Dosya)* | `chmod +x *.AppImage && ./*.AppImage` | [İndir (.AppImage)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-x86_64.AppImage) |
-| 🐧 **Ubuntu / Debian / Linux Mint / Pop!_OS** | **.deb** | `sudo apt install ./goley-revival-linux_*.deb` | [İndir (.deb)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux_0.1.5_amd64.deb) |
-| 🏹 **Arch Linux / CachyOS / Manjaro** | **.pkg.tar.zst** *(Pacman)* | `sudo pacman -U goley-revival-linux-*.pkg.tar.zst` | [İndir (.pkg.tar.zst)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-0.1.5-1-x86_64.pkg.tar.zst) |
-| 🎩 **Fedora / Nobara / openSUSE / RHEL** | **.rpm** | `sudo dnf install ./goley-revival-linux-*.rpm` | [İndir (.rpm)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-0.1.5-1.x86_64.rpm) |
+| 🐧 **Ubuntu / Debian / Linux Mint / Pop!_OS** | **.deb** | `sudo apt install ./goley-revival-linux_*.deb` | [İndir (.deb)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux_0.1.6_amd64.deb) |
+| 🏹 **Arch Linux / CachyOS / Manjaro** | **.pkg.tar.zst** *(Pacman)* | `sudo pacman -U goley-revival-linux-*.pkg.tar.zst` | [İndir (.pkg.tar.zst)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-0.1.6-1-x86_64.pkg.tar.zst) |
+| 🎩 **Fedora / Nobara / openSUSE / RHEL** | **.rpm** | `sudo dnf install ./goley-revival-linux-*.rpm` | [İndir (.rpm)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-0.1.6-1.x86_64.rpm) |
 | 📦 **Taşınabilir Arşiv (Tüm Dağıtımlar)** | **.tar.gz** + `install.sh` | `tar -xzf *.tar.gz && ./install.sh` | [İndir (.tar.gz)](https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-x86_64.tar.gz) |
 
 ---
@@ -117,7 +117,7 @@ Uygulamayı başlatmak için uygulama menünüzden **Goley Revival** aratabilir 
 #### A) Gerekli Sistem ve Uyumluluk Paketlerini Kurun
 
 ```bash
-sudo pacman -S --needed git base-devel gtk4 libadwaita wine winetricks gamemode lib32-gamemode mangohud lib32-mangohud
+sudo pacman -S --needed git base-devel gtk4 libadwaita wine gnutls lib32-gnutls winetricks gamemode lib32-gamemode mangohud lib32-mangohud
 ```
 
 > **Önerilen (CachyOS / AUR kullanıcıları için):** En yüksek uyumluluk için `umu-launcher` ve `proton-ge-custom-bin` kurmanız tavsiye edilir:
@@ -283,10 +283,11 @@ Steam Deck'in salt-okunur dosya sistemini bozmadan tek tıkla çalıştırabilir
 </details>
 
 <details>
-<summary><b>4. Klavye Ok Tuşları ve Gamepad Yönlendirmesi (WASD)</b></summary>
+<summary><b>4. Maç İçinde Ok Tuşlarının Çalışmaması</b></summary>
 
-Goley Revival oyun motoru maç esnasında yönlendirme için **W-A-S-D** tuşlarını ve XInput tabanlı oyun kollarını (Xbox, DualShock, DualSense, Steam Controller) tam destekler.
-Linux ve Wayland/XWayland ortamında bazı klavye düzenlerinde ok tuşları yerine **W-A-S-D** veya Gamepad kullanımı en akıcı ve hatasız maç deneyimini sunar.
+Varsayılan klavye düzeninde **hareket ok tuşlarıyla**, pas/şut gibi eylemler ise **W-A-S-D** ile yapılır. WASD veya Esc'nin çalışması, yön tuşlarının da doğru okunduğunu göstermez. Linux/Wine üzerinde maç içinde oklarla hareket edilemiyorsa nedenini ayırt etmek için giriş tanısı gerekir; bu sorun için doğrulanmış bir otomatik düzeltme henüz yoktur.
+
+Geliştirici tanısı: [klavye test aracı](tools/README.md), oyunun dosyalarını ve tuş atamalarını değiştirmeden Win32/DirectInput durumlarını karşılaştırır. Eski `dinput8.dll` köprüsü kilitlenme sorunları nedeniyle kaldırılmıştır.
 </details>
 
 <details>

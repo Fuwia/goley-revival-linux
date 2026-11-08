@@ -91,6 +91,65 @@ pub fn stop_running_game(prefix: &Path) {
     }
 }
 
+fn stop_launcher_only(prefix: &Path) {
+    let _ = send_bridge_command(prefix, "QUIT\n");
+    for _ in 0..5 {
+        if find_running_pids().1.is_none() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(80));
+    }
+    if let Some(pid) = find_running_pids().1 {
+        let _ = Command::new("kill")
+            .args(["-15", &pid.to_string()])
+            .status();
+        for _ in 0..6 {
+            if find_running_pids().1.is_none() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(80));
+        }
+    }
+}
+
+fn detect_runner_version(kind: &RunnerKind) -> String {
+    match kind {
+        RunnerKind::Wine { wine_bin } => Command::new(wine_bin)
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "bilinmiyor".to_string()),
+        RunnerKind::Umu {
+            umu_bin,
+            proton_dir,
+        } => {
+            let umu_ver = Command::new(umu_bin)
+                .arg("--version")
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.lines().next().unwrap_or("").trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "umu-run".to_string());
+            let p_name = proton_dir
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str())
+                .unwrap_or("varsayılan");
+            format!("{} / {}", umu_ver, p_name)
+        }
+        RunnerKind::ProtonDirect { proton_script } => proton_script
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or("Proton")
+            .to_string(),
+    }
+}
+
 pub fn launch_headless_session(
     cfg: AppConfig,
     creds: Option<LoginCredentials>,
@@ -134,20 +193,32 @@ fn run_session_inner(
     // 1. Atomically install x64 + x86 ncrypt.dll shims
     install_ncrypt_shims(prefix)?;
 
-    let (existing_game_pid, existing_launcher_pid) = find_running_pids();
+    let (existing_game_pid, mut existing_launcher_pid) = find_running_pids();
     if let Some(gpid) = existing_game_pid {
         let _ = tx.send_blocking(RunnerEvent::GameRunning { pid: gpid });
         monitor_until_exit(prefix, tx);
         return Ok(());
     }
 
+    // If the user clicked "OYNA" freshly (creds.is_none()) while a stale background
+    // revival_launcher.exe is still lingering (e.g. after a previous launch error or
+    // runner setting change), restart it cleanly so current runner & shims take effect.
+    if existing_launcher_pid.is_some() && creds.is_none() {
+        let _ = tx.send_blocking(RunnerEvent::LogLine(
+            "[goley-revival-linux] Önceki arka plan başlatıcısı kapatılıp güncel ayarlarla yeniden başlatılıyor..."
+                .to_string(),
+        ));
+        stop_launcher_only(prefix);
+        existing_launcher_pid = find_running_pids().1;
+    }
+
     let log_path = revival_launcher_log_path(prefix);
     let mut log_offset: u64 = 0;
 
-    // 2. If revival_launcher.exe is already waiting invisibly in background (e.g. after login prompt)
+    // 2. If revival_launcher.exe is waiting invisibly in background for login credentials
     if existing_launcher_pid.is_some() {
         let _ = tx.send_blocking(RunnerEvent::LogLine(format!(
-            "[goley-revival-linux] Mevcut arka plan başlatıcısı kullanılıyor (Prefix: {}). Ayarlardaki katman bu işleme yeniden uygulanmadı.",
+            "[goley-revival-linux] Mevcut arka plan başlatıcısı kullanılıyor (Prefix: {}).",
             prefix.display()
         )));
         if let Ok(meta) = fs::metadata(&log_path) {
@@ -197,10 +268,12 @@ fn run_session_inner(
             pulsing: true,
         });
 
+        let runner_ver = detect_runner_version(&runner.kind);
         let mut cmd = build_runner_command(cfg, &runner.kind, &launcher_exe)?;
         let _ = tx.send_blocking(RunnerEvent::LogLine(format!(
-            "[goley-revival-linux] Başlatılıyor: {} (Prefix: {})",
+            "[goley-revival-linux] Başlatılıyor: {} [{}] (Prefix: {})",
             runner.label,
+            runner_ver,
             prefix.display()
         )));
 
@@ -216,8 +289,7 @@ fn run_session_inner(
         cmd.current_dir(&rev_root)
             .stdin(Stdio::null())
             .stdout(out)
-            .stderr(err)
-            .env("WINEDEBUG", "-all");
+            .stderr(err);
 
         let mut child = cmd
             .spawn()
@@ -336,7 +408,11 @@ fn run_session_inner(
                                 detail: trimmed.clone(),
                                 pulsing: true,
                             });
-                        } else if trimmed.contains("AuthClient: no stored session") {
+                        } else if trimmed.contains("AuthClient: no stored session")
+                            || trimmed.contains("AuthClient: dropping the stored session")
+                            || trimmed.contains("AuthClient: restore request failed")
+                            || trimmed.contains("AuthClient: restore failed")
+                        {
                             no_stored_session = true;
                         } else if trimmed.contains("-> Ready") {
                             watch.phase = "başlatıcının hazır olması";
@@ -376,9 +452,30 @@ fn run_session_inner(
                                     .to_string(),
                                 pulsing: true,
                             });
+                        } else if trimmed.contains("AuthClient: ticket issued") {
+                            watch.phase = "oyun başlangıç verisinin hazırlanması (GameLauncher)";
+                            ticket_requested = true;
+                            let _ = tx.send_blocking(RunnerEvent::Status {
+                                headline: "Giriş bileti alındı, oyun hazırlanıyor...".to_string(),
+                                detail:
+                                    "Oyun başlangıç verisi hazırlanıyor ve BinaryTrU.exe başlatılıyor"
+                                        .to_string(),
+                                pulsing: true,
+                            });
                         } else if let Some(idx) = trimmed.find("ticket failed") {
                             let reason = trimmed[idx..].to_string();
+                            stop_launcher_only(prefix);
                             return Err(format!("Oyun bileti alınamadı: {}", reason));
+                        } else if trimmed.contains("GameLauncher: cannot start the game")
+                            || trimmed.contains("RevivalLauncher: game launch failed")
+                            || trimmed.contains("GameLauncher: the game failed to start")
+                            || trimmed.contains("GameLauncher: game executable not found")
+                        {
+                            stop_launcher_only(prefix);
+                            return Err(format!(
+                                "Resmi başlatıcı oyunu başlatamadı ({}). Ayrıntılar için >_ Günlükler penceresini açın.",
+                                trimmed
+                            ));
                         } else if trimmed.contains("GameLauncher: starting the game")
                             || trimmed.contains("GameLauncher: game started")
                         {
@@ -539,9 +636,10 @@ fn assemble_wrapped_command(wrappers: &[String], base_args: &[String]) -> Comman
 }
 
 fn apply_common_envs(cmd: &mut Command, cfg: &AppConfig) {
+    cmd.env("WINEDEBUG", "-all");
     cmd.env(
         "WINEDLLOVERRIDES",
-        "ncrypt=n,b;d3d9,d3dx9_42,d3dx9_31,d3dcompiler_42,d3d10core,d3d11,dxgi=n,b;winedbg.exe=d",
+        "ncrypt=n,b;bcrypt=b;d3d9,d3dx9_42,d3dx9_31,d3dcompiler_42,d3d10core,d3d11,dxgi=n,b;winedbg.exe=d",
     );
     cmd.env("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "0");
     cmd.env("GOLEY_HEADLESS", "1");
