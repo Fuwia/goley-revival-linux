@@ -47,6 +47,21 @@ jobs:
           chmod +x packaging/build_all.sh
           ./packaging/build_all.sh
 
+      - name: Verify all release packages and checksums
+        run: |
+          VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          for file in \
+            goley-revival-linux-x86_64.AppImage \
+            goley-revival-linux-x86_64.tar.gz \
+            "goley-revival-linux_${VERSION}_amd64.deb" \
+            "goley-revival-linux-${VERSION}-1-x86_64.pkg.tar.zst" \
+            "goley-revival-linux-${VERSION}-1.x86_64.rpm"; do
+            test -s "dist/$file"
+            test -s "dist/$file.sha256"
+          done
+          cd dist
+          sha256sum --check SHA256SUMS.txt
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:

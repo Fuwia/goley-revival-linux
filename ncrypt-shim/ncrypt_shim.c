@@ -1105,6 +1105,77 @@ static BOOL mem_eq(const BYTE *a, const BYTE *b, SIZE_T len) {
     return TRUE;
 }
 
+/* No CRT, allocation, or symbol loading in the exception path.  Wine maps Z:
+ * to /, so this remains usable even when the game terminates before BugTrap. */
+static HANDLE g_displayLog = INVALID_HANDLE_VALUE;
+
+static void display_log(const char *event, const DWORD *values, SIZE_T count) {
+    static const char hex[] = "0123456789abcdef";
+    char line[512];
+    SIZE_T n = 0, i;
+    DWORD written;
+    if (g_displayLog == INVALID_HANDLE_VALUE) return;
+    while (*event && n < 80) line[n++] = *event++;
+    for (i = 0; i < count && n + 10 < sizeof(line); i++) {
+        int shift;
+        line[n++] = ' ';
+        for (shift = 28; shift >= 0; shift -= 4)
+            line[n++] = hex[(values[i] >> shift) & 15];
+    }
+    line[n++] = '\n';
+    WriteFile(g_displayLog, line, (DWORD)n, &written, NULL);
+}
+
+static LONG CALLBACK display_exception(EXCEPTION_POINTERS *ex) {
+    CONTEXT *c = ex->ContextRecord;
+    DWORD code = ex->ExceptionRecord->ExceptionCode;
+    DWORD values[14];
+    MEMORY_BASIC_INFORMATION mbi;
+    if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION &&
+        code != EXCEPTION_INT_DIVIDE_BY_ZERO &&
+        code != 0xc0000374u && code != 0xc0000409u) return EXCEPTION_CONTINUE_SEARCH;
+    values[0] = GetCurrentThreadId(); values[1] = code;
+    values[2] = c->Eip; values[3] = c->Esp; values[4] = c->Ebp;
+    values[5] = c->Eax; values[6] = c->Ebx; values[7] = c->Ecx;
+    values[8] = c->Edx; values[9] = c->Esi; values[10] = c->Edi;
+    values[11] = ex->ExceptionRecord->ExceptionInformation[0];
+    values[12] = ex->ExceptionRecord->ExceptionInformation[1];
+    values[13] = VirtualQuery((void *)c->Eip, &mbi, sizeof(mbi))
+        ? (DWORD)(DWORD_PTR)mbi.AllocationBase : 0;
+    display_log("exception tid code eip esp ebp eax ebx ecx edx esi edi access addr module", values, 14);
+    if (VirtualQuery((void *)c->Esp, &mbi, sizeof(mbi)) && mbi.State == MEM_COMMIT &&
+        !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) {
+        SIZE_T count = ((DWORD_PTR)mbi.BaseAddress + mbi.RegionSize - c->Esp) / 4;
+        if (count > 32) count = 32;
+        display_log("stack", (DWORD *)c->Esp, count);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void install_display_diagnostics(void) {
+    DWORD values[2] = { GetCurrentProcessId(), GetCurrentThreadId() };
+    g_displayLog = CreateFileA("Z:\\tmp\\goley_display.log", FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    AddVectoredExceptionHandler(1, display_exception);
+    display_log("display shim start pid tid", values, 2);
+}
+
+static volatile LONG g_displayResetCount;
+static HRESULT WINAPI traced_d3d_reset(void *device, DWORD *params) {
+    typedef HRESULT (WINAPI *ResetFn)(void *, DWORD *);
+    ResetFn reset = (ResetFn)(*(void ***)device)[16];
+    DWORD values[4];
+    HRESULT hr;
+    values[0] = InterlockedIncrement(&g_displayResetCount);
+    values[1] = GetCurrentThreadId();
+    display_log("reset begin seq tid", values, 2);
+    display_log("present parameters", params, 14);
+    hr = reset(device, params);
+    values[2] = hr;
+    display_log("reset end seq tid hr", values, 3);
+    return hr;
+}
+
 static BOOL patch_code_bytes(BYTE *addr, const BYTE *expected, const BYTE *replacement, SIZE_T len) {
     DWORD oldProt = 0;
     SIZE_T i;
@@ -1403,6 +1474,17 @@ static void install_game_display_patches(void) {
         return;
     }
 
+    install_display_diagnostics();
+    {
+        WCHAR trace[2];
+        static const BYTE expected[6] = {0x8b, 0x42, 0x40, 0x51, 0xff, 0xd0};
+        /* Keep the following TEST EAX,EAX and its failure branch intact. */
+        BYTE replacement[6] = {0x51, 0xe8, 0, 0, 0, 0};
+        *(DWORD *)(replacement + 2) = (DWORD)(DWORD_PTR)&traced_d3d_reset - 0x009ab674u;
+        if (GetEnvironmentVariableW(L"GOLEY_DISPLAY_TRACE", trace, 2) == 1 && trace[0] == L'1')
+            patch_code_bytes((BYTE *)0x009ab66eu, expected, replacement, sizeof(replacement));
+    }
+
     /*
      * 1. Patch ApplyDisplaySettings (0x00d375b0):
      *    - 0x00d37867: NOP out `mov edi, [ebx+0x8c]; mov esi, [ebx+0x88]` (12 bytes)
@@ -1458,24 +1540,38 @@ static void install_game_display_patches(void) {
      *    and scroll wheel events align with the stretched fullscreen image.
      */
     {
-        static const BYTE exp_d36ae0[9] = {
-            0x55, 0x8B, 0xEC, 0x51, 0xA1, 0x04, 0xAA, 0x2B, 0x01
+        static const BYTE exp_d36ae0[25] = {
+            0x55, 0x8B, 0xEC, 0x51, 0xA1, 0x04, 0xAA, 0x2B, 0x01,
+            0x8B, 0x40, 0x1C, 0x8B, 0x40, 0x14, 0x85, 0xC0,
+            0x0F, 0x84, 0x80, 0x00, 0x00, 0x00, 0x83, 0xF8
+        };
+        /* This space belongs to the original mouse function, which becomes
+         * unreachable after replacing its entry. Verify it before reusing it. */
+        static const BYTE exp_d36b00[18] = {
+            0x1A, 0xDB, 0x45, 0x0C, 0xD9, 0x1E, 0x8B, 0xE5, 0x5D,
+            0xC2, 0x08, 0x00, 0x83, 0xF8, 0x02, 0x0F, 0x85, 0xE2
         };
         static const BYTE exp_d38be5[5] = {
             0xE9, 0x1F, 0xFF, 0xFF, 0xFF
         };
-        if (mem_eq((const BYTE *)0x00d36ae0u, exp_d36ae0, 9)) {
-            static const BYTE tpl_thunk1[21] = {
-                0xFF, 0x74, 0x24, 0x08,       /* push DWORD PTR [esp+8] (mouseY) */
-                0xFF, 0x74, 0x24, 0x08,       /* push DWORD PTR [esp+8] (mouseX) */
+        if (mem_eq((const BYTE *)0x00d36ae0u, exp_d36ae0, sizeof(exp_d36ae0)) &&
+            mem_eq((const BYTE *)0x00d36b00u, exp_d36b00, sizeof(exp_d36b00)) &&
+            mem_eq((const BYTE *)0x00d38be5u, exp_d38be5, sizeof(exp_d38be5))) {
+            static const BYTE tpl_thunk1[] = {
+                0x51,                         /* preserve ecx (custom game ABI) */
+                0x52,                         /* preserve edx (custom game ABI) */
+                0xFF, 0x74, 0x24, 0x10,       /* push DWORD PTR [esp+16] (mouseY) */
+                0xFF, 0x74, 0x24, 0x10,       /* push DWORD PTR [esp+16] (mouseX) */
                 0x56,                         /* push esi (outY) */
                 0x52,                         /* push edx (outX) */
                 0x51,                         /* push ecx (winObj) */
                 0xB8, 0x00, 0x00, 0x00, 0x00, /* mov eax, goley_scale_mouse_coords */
                 0xFF, 0xD0,                   /* call eax */
+                0x5A,                         /* restore edx */
+                0x59,                         /* restore ecx */
                 0xC2, 0x08, 0x00              /* ret 8 */
             };
-            static const BYTE tpl_thunk2[19] = {
+            static const BYTE tpl_thunk2[] = {
                 0x51,                         /* push ecx (ScaleformUIMgr*) */
                 0x52,                         /* push edx (&MouseEvent) */
                 0x52,                         /* push edx (arg2: &MouseEvent) */
@@ -1486,21 +1582,25 @@ static void install_game_display_patches(void) {
                 0x59,                         /* pop ecx */
                 0xE9, 0x00, 0x00, 0x00, 0x00  /* jmp 0x00d38b09 */
             };
-            BYTE thunk1[21];
-            BYTE thunk2[19];
+            BYTE thunk1[sizeof(tpl_thunk1)];
+            BYTE thunk2[sizeof(tpl_thunk2)];
             BYTE jmpWheel[5];
 
             copy_mem(thunk1, tpl_thunk1, sizeof(thunk1));
             copy_mem(thunk2, tpl_thunk2, sizeof(thunk2));
             jmpWheel[0] = 0xE9;
 
-            *(DWORD *)(thunk1 + 12)  = (DWORD)(DWORD_PTR)&goley_scale_mouse_coords;
+            *(DWORD *)(thunk1 + 14)  = (DWORD)(DWORD_PTR)&goley_scale_mouse_coords;
             *(DWORD *)(thunk2 + 5)   = (DWORD)(DWORD_PTR)&goley_scale_wheel_event;
-            *(DWORD *)(thunk2 + 15)  = (DWORD)(0x00d38b09u - (0x00d36b00u + 19u));
+            /* E9 is at +13, its rel32 starts at +14, and the next instruction
+             * is at +18.  v0.1.7 declared 19 bytes and wrote at +15, producing
+             * a jump to 0x00f36112 and an AV on the first WM_MOUSEWHEEL. */
+            *(DWORD *)(thunk2 + sizeof(thunk2) - sizeof(DWORD)) =
+                (DWORD)(0x00d38b09u - (0x00d36b00u + sizeof(thunk2)));
             *(DWORD *)(jmpWheel + 1) = (DWORD)(0x00d36b00u - (0x00d38be5u + 5u));
 
-            patch_code_bytes((BYTE *)0x00d36ae0u, NULL, thunk1, sizeof(thunk1));
-            patch_code_bytes((BYTE *)0x00d36b00u, NULL, thunk2, sizeof(thunk2));
+            patch_code_bytes((BYTE *)0x00d36ae0u, exp_d36ae0, thunk1, sizeof(thunk1));
+            patch_code_bytes((BYTE *)0x00d36b00u, exp_d36b00, thunk2, sizeof(thunk2));
             patch_code_bytes((BYTE *)0x00d38be5u, exp_d38be5, jmpWheel, sizeof(jmpWheel));
         }
     }

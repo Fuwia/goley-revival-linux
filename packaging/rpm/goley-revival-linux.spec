@@ -2,7 +2,7 @@
 %define _build_id_links none
 
 Name:           goley-revival-linux
-Version:        0.1.7
+Version:        0.1.8
 Release:        1%{?dist}
 Summary:        Goley Revival için doğal GTK4 + Libadwaita Linux başlatıcısı
 License:        GPL-3.0-or-later

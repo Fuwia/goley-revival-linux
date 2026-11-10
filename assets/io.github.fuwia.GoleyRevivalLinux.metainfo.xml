@@ -17,6 +17,15 @@
     <name>Fuwia</name>
   </developer>
   <releases>
+    <release version="0.1.8" date="2026-11-10">
+      <description>
+        <ul>
+          <li>Fix a mouse-wheel thunk jump encoding error that could crash the game while changing resolution or scrolling graphics settings.</li>
+          <li>Preserve mouse helper registers and validate all input patch locations before modifying game code.</li>
+          <li>Add crash diagnostics and compiled x86 regression tests; validate repeated resolution changes, confirmations, and wheel events under Wine/DXVK.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.7" date="2026-11-10">
       <description>
         <ul>
