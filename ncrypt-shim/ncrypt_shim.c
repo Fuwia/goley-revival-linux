@@ -76,6 +76,14 @@ static void zero_mem(void *ptr, SIZE_T len) {
     }
 }
 
+static void copy_mem(void *dst, const void *src, SIZE_T len) {
+    volatile BYTE *d = (volatile BYTE *)dst;
+    const volatile BYTE *s = (const volatile BYTE *)src;
+    while (len--) {
+        *d++ = *s++;
+    }
+}
+
 static BOOL str_ends_with_i_w(const WCHAR *str, const WCHAR *suffix) {
     int slen = lstrlenW(str);
     int xlen = lstrlenW(suffix);
@@ -727,6 +735,32 @@ static DWORD WINAPI headless_bridge_thread(LPVOID param) {
  *   `3DES` in pure C, launch data preparation succeeds on all Wine/Proton builds.
  * ========================================================================= */
 
+static BOOL str_eq_i_a(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = *a++;
+        char cb = *b++;
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+        if (ca != cb) return FALSE;
+    }
+    return *a == *b;
+}
+
+static BOOL str_eq_a(const char *a, const char *b) {
+    while (*a && *b) {
+        if (*a++ != *b++) return FALSE;
+    }
+    return *a == *b;
+}
+
+static void patch_iat_slot(void **slot, void *replacement) {
+    DWORD oldProt = 0;
+    if (VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &oldProt)) {
+        *slot = replacement;
+        VirtualProtect(slot, sizeof(void *), oldProt, &oldProt);
+    }
+}
+
 #ifdef _WIN64
 
 typedef unsigned char u8;
@@ -838,24 +872,6 @@ static u64 des_crypt_block(u64 block, const u64 subkeys[16], int decrypt) {
         l = next_l;
     }
     return des_permute((((u64)r) << 32) | (u64)l, DES_FP, 64, 64);
-}
-
-static BOOL str_eq_i_a(const char *a, const char *b) {
-    while (*a && *b) {
-        char ca = *a++;
-        char cb = *b++;
-        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
-        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
-        if (ca != cb) return FALSE;
-    }
-    return *a == *b;
-}
-
-static BOOL str_eq_a(const char *a, const char *b) {
-    while (*a && *b) {
-        if (*a++ != *b++) return FALSE;
-    }
-    return *a == *b;
 }
 
 static NTSTATUS WINAPI hook_BCryptOpenAlgorithmProvider(
@@ -1000,14 +1016,6 @@ static NTSTATUS WINAPI hook_BCryptCloseAlgorithmProvider(BCRYPT_ALG_HANDLE hAlgo
 
 static volatile LONG g_bcryptHooked = 0;
 
-static void patch_iat_slot(void **slot, void *replacement) {
-    DWORD oldProt = 0;
-    if (VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &oldProt)) {
-        *slot = replacement;
-        VirtualProtect(slot, sizeof(void *), oldProt, &oldProt);
-    }
-}
-
 static void install_bcrypt_3des_hooks(void) {
     HMODULE hExe;
     BYTE *base;
@@ -1058,8 +1066,446 @@ static void install_bcrypt_3des_hooks(void) {
     }
 }
 
-#else
+static void install_game_display_patches(void) {}
+
+#else /* !_WIN64: 32-bit BinaryTrU.exe Fullscreen Resolution & Scaling Fix */
+
 static void install_bcrypt_3des_hooks(void) {}
+
+/*
+ * Why Fullscreen Lower Resolutions Failed in BinaryTrU.exe:
+ *   1. `revival_client.dll` hooks `Option.ini` (`0x00d324a9`) and
+ *      `Resolution_ResetTestPane` (`0x00d37440`) to rewrite `FullScreen = 1`
+ *      (Exclusive Fullscreen) to `FullScreen = 2` (Borderless Fullscreen
+ *      `WS_POPUP` `0x96000000`, `D3DPRESENT_PARAMETERS.Windowed = TRUE`).
+ *   2. However, in `BinaryTrU.exe`'s `ApplyDisplaySettings` (`0x00d375b0`),
+ *      the `mode == 2` branch at `0x00d37867` executes:
+ *        mov edi, [ebx+0x8c] ; overwrite target height with desktop height!
+ *        mov esi, [ebx+0x88] ; overwrite target width with desktop width!
+ *      which forces the D3D9 backbuffer and `Option->ScreenWidth/Height` back
+ *      to the monitor's native desktop resolution (`1920x1080` / `1920x1200`).
+ *   3. In `WndProc`, `WM_SIZE` (`0x00d38697`, `0x00d386e5`) and `WM_EXITSIZEMOVE`
+ *      (`0x00d38f8b`) call `0x00d37550` with `GetClientRect` (`1920x1080`),
+ *      which also overwrites `Option->ScreenWidth/Height` when the borderless
+ *      window is resized to cover the screen.
+ *   4. When rendering a lower backbuffer (e.g. `1280x720`) inside a fullscreen
+ *      borderless window (`1920x1080`), D3D9 `Present(NULL, NULL, NULL, NULL)`
+ *      stretches the backbuffer across the fullscreen window, but `0x00d36ae0`
+ *      only scaled mouse coordinates when the window was `< 1024x768`.
+ *   5. On Wayland/XWayland setups where XRandR only reports a single native
+ *      resolution, `EnumDisplaySettingsW/ExW` needs to expose standard 16:9,
+ *      16:10, and 4:3 modes (`>= 1024x768`) up to the native monitor size.
+ */
+
+static BOOL mem_eq(const BYTE *a, const BYTE *b, SIZE_T len) {
+    SIZE_T i;
+    for (i = 0; i < len; i++) {
+        if (a[i] != b[i]) return FALSE;
+    }
+    return TRUE;
+}
+
+static BOOL patch_code_bytes(BYTE *addr, const BYTE *expected, const BYTE *replacement, SIZE_T len) {
+    DWORD oldProt = 0;
+    SIZE_T i;
+    if (expected && !mem_eq(addr, expected, len)) {
+        return FALSE;
+    }
+    if (!VirtualProtect(addr, len, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        return FALSE;
+    }
+    for (i = 0; i < len; i++) {
+        addr[i] = replacement[i];
+    }
+    VirtualProtect(addr, len, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), addr, len);
+    return TRUE;
+}
+
+static void compute_render_and_window_dims(
+    BYTE *winObj,
+    int *outRenW,
+    int *outRenH,
+    int *outWinW,
+    int *outWinH)
+{
+    int renW = 1024, renH = 768;
+    int winW = 0, winH = 0;
+    DWORD_PTR app = *(DWORD_PTR *)0x012baa04u;
+
+    if (app) {
+        DWORD_PTR ren = *(DWORD_PTR *)(app + 0x04);
+        DWORD_PTR opt = *(DWORD_PTR *)(app + 0x1c);
+        if (ren) {
+            int rw = *(int *)(ren + 0x10);
+            int rh = *(int *)(ren + 0x14);
+            if (rw > 0 && rh > 0) {
+                renW = rw;
+                renH = rh;
+            }
+        } else if (opt) {
+            int ow = *(int *)(opt + 0x08);
+            int oh = *(int *)(opt + 0x0c);
+            if (ow > 0 && oh > 0) {
+                renW = ow;
+                renH = oh;
+            }
+        }
+        if (renW < 1024) renW = 1024;
+        if (renH < 768)  renH = 768;
+
+        if (winObj) {
+            HWND hwnd = *(HWND *)(winObj + 0x04);
+            RECT rc;
+            zero_mem(&rc, sizeof(rc));
+            if (hwnd && GetClientRect(hwnd, &rc) &&
+                (rc.right - rc.left) > 0 && (rc.bottom - rc.top) > 0) {
+                winW = rc.right - rc.left;
+                winH = rc.bottom - rc.top;
+            } else {
+                int mode = opt ? *(int *)(opt + 0x14) : 0;
+                if (mode == 2) {
+                    winW = *(int *)(winObj + 0x88);
+                    winH = *(int *)(winObj + 0x8c);
+                } else {
+                    winW = *(int *)(winObj + 0xc8);
+                    winH = *(int *)(winObj + 0xcc);
+                }
+            }
+        }
+    }
+
+    if (winW <= 0) winW = renW;
+    if (winH <= 0) winH = renH;
+    *outRenW = renW;
+    *outRenH = renH;
+    *outWinW = winW;
+    *outWinH = winH;
+}
+
+static void WINAPI goley_scale_mouse_coords(
+    BYTE *winObj,
+    float *outX,
+    float *outY,
+    int mouseX,
+    int mouseY)
+{
+    int renW, renH, winW, winH;
+    compute_render_and_window_dims(winObj, &renW, &renH, &winW, &winH);
+    if (outX) *outX = (float)mouseX * (float)renW / (float)winW;
+    if (outY) *outY = (float)mouseY * (float)renH / (float)winH;
+}
+
+static void WINAPI goley_scale_wheel_event(
+    BYTE *winObj,
+    BYTE *mouseEvent)
+{
+    int renW, renH, winW, winH;
+    float *px;
+    float *py;
+    if (!mouseEvent) return;
+    px = (float *)(mouseEvent + 0x08);
+    py = (float *)(mouseEvent + 0x0c);
+    compute_render_and_window_dims(winObj, &renW, &renH, &winW, &winH);
+    *px = (*px) * (float)renW / (float)winW;
+    *py = (*py) * (float)renH / (float)winH;
+}
+
+typedef struct {
+    DWORD w;
+    DWORD h;
+} GoleyStdMode;
+
+static const GoleyStdMode GOLEY_STD_MODES[] = {
+    { 1024,  768 },
+    { 1152,  864 },
+    { 1280,  720 },
+    { 1280,  768 },
+    { 1280,  800 },
+    { 1280,  960 },
+    { 1280, 1024 },
+    { 1360,  768 },
+    { 1366,  768 },
+    { 1440,  900 },
+    { 1600,  900 },
+    { 1600, 1024 },
+    { 1600, 1200 },
+    { 1680, 1050 },
+    { 1920, 1080 },
+    { 1920, 1200 },
+    { 2560, 1440 },
+    { 2560, 1600 },
+    { 3840, 2160 }
+};
+
+#define GOLEY_STD_MODE_COUNT (sizeof(GOLEY_STD_MODES) / sizeof(GOLEY_STD_MODES[0]))
+
+static DWORD g_enumRealCount = 0;
+static BOOL g_hasTemplateMode = FALSE;
+static DEVMODEW g_templateMode;
+
+static BOOL fill_synthetic_devmode(LPCWSTR lpszDeviceName, DWORD extraIdx, DEVMODEW *lpDevMode) {
+    DWORD maxW = (DWORD)GetSystemMetrics(SM_CXSCREEN);
+    DWORD maxH = (DWORD)GetSystemMetrics(SM_CYSCREEN);
+    DWORD matchIdx = 0;
+    SIZE_T i;
+
+    if (!lpDevMode) return FALSE;
+    if (maxW < 1024 || maxH < 768) {
+        maxW = 1920;
+        maxH = 1080;
+    }
+
+    for (i = 0; i < GOLEY_STD_MODE_COUNT; i++) {
+        if (GOLEY_STD_MODES[i].w <= maxW && GOLEY_STD_MODES[i].h <= maxH) {
+            if (matchIdx == extraIdx) {
+                if (!g_hasTemplateMode) {
+                    zero_mem(&g_templateMode, sizeof(g_templateMode));
+                    g_templateMode.dmSize = sizeof(g_templateMode);
+                    if (EnumDisplaySettingsW(lpszDeviceName, ENUM_CURRENT_SETTINGS, &g_templateMode)) {
+                        g_hasTemplateMode = TRUE;
+                    }
+                }
+                if (g_hasTemplateMode) {
+                    copy_mem(lpDevMode, &g_templateMode, sizeof(*lpDevMode));
+                } else {
+                    zero_mem(lpDevMode, sizeof(*lpDevMode));
+                    lpDevMode->dmSize = sizeof(*lpDevMode);
+                }
+                lpDevMode->dmPelsWidth = GOLEY_STD_MODES[i].w;
+                lpDevMode->dmPelsHeight = GOLEY_STD_MODES[i].h;
+                lpDevMode->dmBitsPerPel = 32;
+                lpDevMode->dmDisplayFlags = 0;
+                if (lpDevMode->dmDisplayFrequency < 50) {
+                    lpDevMode->dmDisplayFrequency = 60;
+                }
+                lpDevMode->dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT |
+                                      DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
+                return TRUE;
+            }
+            matchIdx++;
+        }
+    }
+    return FALSE;
+}
+
+static BOOL WINAPI hook_EnumDisplaySettingsW(
+    LPCWSTR lpszDeviceName,
+    DWORD iModeNum,
+    DEVMODEW *lpDevMode)
+{
+    BOOL ok;
+    if (iModeNum == (DWORD)-1 || iModeNum == (DWORD)-2) {
+        return EnumDisplaySettingsW(lpszDeviceName, iModeNum, lpDevMode);
+    }
+    if (iModeNum == 0) {
+        g_enumRealCount = 0;
+    }
+    ok = EnumDisplaySettingsW(lpszDeviceName, iModeNum, lpDevMode);
+    if (ok) {
+        if (iModeNum + 1 > g_enumRealCount) {
+            g_enumRealCount = iModeNum + 1;
+        }
+        if (!g_hasTemplateMode && lpDevMode && lpDevMode->dmBitsPerPel == 32) {
+            copy_mem(&g_templateMode, lpDevMode, sizeof(g_templateMode));
+            g_hasTemplateMode = TRUE;
+        }
+        return TRUE;
+    }
+    if (iModeNum >= g_enumRealCount) {
+        return fill_synthetic_devmode(lpszDeviceName, iModeNum - g_enumRealCount, lpDevMode);
+    }
+    return FALSE;
+}
+
+static BOOL WINAPI hook_EnumDisplaySettingsExW(
+    LPCWSTR lpszDeviceName,
+    DWORD iModeNum,
+    DEVMODEW *lpDevMode,
+    DWORD dwFlags)
+{
+    BOOL ok;
+    if (iModeNum == (DWORD)-1 || iModeNum == (DWORD)-2) {
+        return EnumDisplaySettingsExW(lpszDeviceName, iModeNum, lpDevMode, dwFlags);
+    }
+    if (iModeNum == 0) {
+        g_enumRealCount = 0;
+    }
+    ok = EnumDisplaySettingsExW(lpszDeviceName, iModeNum, lpDevMode, dwFlags);
+    if (ok) {
+        if (iModeNum + 1 > g_enumRealCount) {
+            g_enumRealCount = iModeNum + 1;
+        }
+        if (!g_hasTemplateMode && lpDevMode && lpDevMode->dmBitsPerPel == 32) {
+            copy_mem(&g_templateMode, lpDevMode, sizeof(g_templateMode));
+            g_hasTemplateMode = TRUE;
+        }
+        return TRUE;
+    }
+    if (iModeNum >= g_enumRealCount) {
+        return fill_synthetic_devmode(lpszDeviceName, iModeNum - g_enumRealCount, lpDevMode);
+    }
+    return FALSE;
+}
+
+static void hook_module_user32_enum_display(HMODULE hMod) {
+    BYTE *base;
+    IMAGE_DOS_HEADER *dos;
+    IMAGE_NT_HEADERS *nt;
+    DWORD impRva;
+    IMAGE_IMPORT_DESCRIPTOR *imp;
+
+    if (!hMod) return;
+    base = (BYTE *)hMod;
+    dos = (IMAGE_DOS_HEADER *)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return;
+    nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return;
+
+    impRva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    if (!impRva) return;
+
+    imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + impRva);
+    for (; imp->Name != 0; imp++) {
+        const char *dllName = (const char *)(base + imp->Name);
+        if (str_eq_i_a(dllName, "user32.dll") && imp->OriginalFirstThunk && imp->FirstThunk) {
+            IMAGE_THUNK_DATA *orig = (IMAGE_THUNK_DATA *)(base + imp->OriginalFirstThunk);
+            IMAGE_THUNK_DATA *iat  = (IMAGE_THUNK_DATA *)(base + imp->FirstThunk);
+            for (; orig->u1.AddressOfData != 0; orig++, iat++) {
+                if (!(orig->u1.Ordinal & IMAGE_ORDINAL_FLAG)) {
+                    IMAGE_IMPORT_BY_NAME *ibn = (IMAGE_IMPORT_BY_NAME *)(base + orig->u1.AddressOfData);
+                    const char *fn = (const char *)ibn->Name;
+                    if (str_eq_a(fn, "EnumDisplaySettingsW")) {
+                        patch_iat_slot((void **)&iat->u1.Function, (void *)&hook_EnumDisplaySettingsW);
+                    } else if (str_eq_a(fn, "EnumDisplaySettingsExW")) {
+                        patch_iat_slot((void **)&iat->u1.Function, (void *)&hook_EnumDisplaySettingsExW);
+                    }
+                }
+            }
+        }
+    }
+}
+
+static volatile LONG g_gamePatched = 0;
+
+static void install_game_display_patches(void) {
+    WCHAR exePath[MAX_PATH];
+
+    /* Always ensure d3d9.dll / wined3d.dll IATs are hooked if loaded */
+    hook_module_user32_enum_display(GetModuleHandleW(L"d3d9.dll"));
+    hook_module_user32_enum_display(GetModuleHandleW(L"wined3d.dll"));
+
+    if (InterlockedCompareExchange(&g_gamePatched, 1, 0) != 0) return;
+
+    zero_mem(exePath, sizeof(exePath));
+    if (GetModuleFileNameW(NULL, exePath, MAX_PATH) == 0 ||
+        !str_ends_with_i_w(exePath, L"BinaryTrU.exe")) {
+        return;
+    }
+
+    /*
+     * 1. Patch ApplyDisplaySettings (0x00d375b0):
+     *    - 0x00d37867: NOP out `mov edi, [ebx+0x8c]; mov esi, [ebx+0x88]` (12 bytes)
+     *      so mode 2 (Borderless Fullscreen) keeps the user's selected resolution
+     *      for the D3D9 backbuffer while the popup window covers the full monitor.
+     *    - 0x00d37667: `mov BYTE PTR [ebp-0x42], 0` so UpdateWindowPos always runs.
+     *    - 0x00d3797b: `mov BYTE PTR [ebp-0x41], 1` so UpdateWindowPos always runs
+     *      at startup when Option.ini already has FullScreen=1 (-> 2).
+     *    - 0x00d37a59: `cmp edi, 2` (was `cmp edi, 3`) so RendererMgr->is_windowed = 1.
+     */
+    {
+        static const BYTE exp_d37867[12] = {
+            0x8B, 0xBB, 0x8C, 0x00, 0x00, 0x00,
+            0x8B, 0xB3, 0x88, 0x00, 0x00, 0x00
+        };
+        static const BYTE nop12[12] = {
+            0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
+            0x90, 0x90, 0x90, 0x90, 0x90, 0x90
+        };
+        static const BYTE exp_d37667[4] = { 0xC6, 0x45, 0xBE, 0x01 };
+        static const BYTE rep_d37667[4] = { 0xC6, 0x45, 0xBE, 0x00 };
+        static const BYTE exp_d3797b[4] = { 0xC6, 0x45, 0xBF, 0x00 };
+        static const BYTE rep_d3797b[4] = { 0xC6, 0x45, 0xBF, 0x01 };
+        static const BYTE exp_d37a59[3] = { 0x83, 0xFF, 0x03 };
+        static const BYTE rep_d37a59[3] = { 0x83, 0xFF, 0x02 };
+
+        patch_code_bytes((BYTE *)0x00d37867u, exp_d37867, nop12, 12);
+        patch_code_bytes((BYTE *)0x00d37667u, exp_d37667, rep_d37667, 4);
+        patch_code_bytes((BYTE *)0x00d3797bu, exp_d3797b, rep_d3797b, 4);
+        patch_code_bytes((BYTE *)0x00d37a59u, exp_d37a59, rep_d37a59, 3);
+    }
+
+    /*
+     * 2. Patch WndProc WM_SIZE / WM_EXITSIZEMOVE calls to 0x00d37550:
+     *    Prevents window manager resize notifications on the fullscreen borderless
+     *    window from overwriting Option->ScreenWidth/Height with 1920x1080.
+     */
+    {
+        static const BYTE exp_d38696[6] = { 0x53, 0xE8, 0xB4, 0xEE, 0xFF, 0xFF };
+        static const BYTE exp_d386e4[6] = { 0x53, 0xE8, 0x66, 0xEE, 0xFF, 0xFF };
+        static const BYTE exp_d38f8a[6] = { 0x53, 0xE8, 0xC0, 0xE5, 0xFF, 0xFF };
+        static const BYTE nop6[6]       = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+
+        patch_code_bytes((BYTE *)0x00d38696u, exp_d38696, nop6, 6);
+        patch_code_bytes((BYTE *)0x00d386e4u, exp_d386e4, nop6, 6);
+        patch_code_bytes((BYTE *)0x00d38f8au, exp_d38f8a, nop6, 6);
+    }
+
+    /*
+     * 3. Patch Mouse Coordinate Scaling in 0x00d36ae0 & WM_MOUSEWHEEL (0x00d38be5):
+     *    Maps window client coordinates (e.g. 1920x1080) to D3D9 backbuffer render
+     *    coordinates (e.g. 1280x720) so all Scaleform UI clicks, hovers, drags,
+     *    and scroll wheel events align with the stretched fullscreen image.
+     */
+    {
+        static const BYTE exp_d36ae0[9] = {
+            0x55, 0x8B, 0xEC, 0x51, 0xA1, 0x04, 0xAA, 0x2B, 0x01
+        };
+        static const BYTE exp_d38be5[5] = {
+            0xE9, 0x1F, 0xFF, 0xFF, 0xFF
+        };
+        if (mem_eq((const BYTE *)0x00d36ae0u, exp_d36ae0, 9)) {
+            static const BYTE tpl_thunk1[21] = {
+                0xFF, 0x74, 0x24, 0x08,       /* push DWORD PTR [esp+8] (mouseY) */
+                0xFF, 0x74, 0x24, 0x08,       /* push DWORD PTR [esp+8] (mouseX) */
+                0x56,                         /* push esi (outY) */
+                0x52,                         /* push edx (outX) */
+                0x51,                         /* push ecx (winObj) */
+                0xB8, 0x00, 0x00, 0x00, 0x00, /* mov eax, goley_scale_mouse_coords */
+                0xFF, 0xD0,                   /* call eax */
+                0xC2, 0x08, 0x00              /* ret 8 */
+            };
+            static const BYTE tpl_thunk2[19] = {
+                0x51,                         /* push ecx (ScaleformUIMgr*) */
+                0x52,                         /* push edx (&MouseEvent) */
+                0x52,                         /* push edx (arg2: &MouseEvent) */
+                0x53,                         /* push ebx (arg1: winObj) */
+                0xB8, 0x00, 0x00, 0x00, 0x00, /* mov eax, goley_scale_wheel_event */
+                0xFF, 0xD0,                   /* call eax */
+                0x5A,                         /* pop edx */
+                0x59,                         /* pop ecx */
+                0xE9, 0x00, 0x00, 0x00, 0x00  /* jmp 0x00d38b09 */
+            };
+            BYTE thunk1[21];
+            BYTE thunk2[19];
+            BYTE jmpWheel[5];
+
+            copy_mem(thunk1, tpl_thunk1, sizeof(thunk1));
+            copy_mem(thunk2, tpl_thunk2, sizeof(thunk2));
+            jmpWheel[0] = 0xE9;
+
+            *(DWORD *)(thunk1 + 12)  = (DWORD)(DWORD_PTR)&goley_scale_mouse_coords;
+            *(DWORD *)(thunk2 + 5)   = (DWORD)(DWORD_PTR)&goley_scale_wheel_event;
+            *(DWORD *)(thunk2 + 15)  = (DWORD)(0x00d38b09u - (0x00d36b00u + 19u));
+            *(DWORD *)(jmpWheel + 1) = (DWORD)(0x00d36b00u - (0x00d38be5u + 5u));
+
+            patch_code_bytes((BYTE *)0x00d36ae0u, NULL, thunk1, sizeof(thunk1));
+            patch_code_bytes((BYTE *)0x00d36b00u, NULL, thunk2, sizeof(thunk2));
+            patch_code_bytes((BYTE *)0x00d38be5u, exp_d38be5, jmpWheel, sizeof(jmpWheel));
+        }
+    }
+}
+
 #endif
 
 static volatile LONG g_bridgeStarted = 0;
@@ -1068,6 +1514,7 @@ static void ensure_bridge_thread_started(void) {
     WCHAR headless[16];
     WCHAR exePath[MAX_PATH];
     install_bcrypt_3des_hooks();
+    install_game_display_patches();
     if (InterlockedCompareExchange(&g_bridgeStarted, 1, 0) != 0) return;
 
     zero_mem(headless, sizeof(headless));

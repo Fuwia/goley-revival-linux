@@ -606,3 +606,273 @@ pub fn format_bytes_human(bytes: u64) -> String {
         format!("{:.1} MB", (bytes as f64 / MB).max(0.1))
     }
 }
+
+const GITHUB_LATEST_RELEASE_API: &str =
+    "https://api.github.com/repos/Fuwia/goley-revival-linux/releases/latest";
+const DEFAULT_TARBALL_URL: &str =
+    "https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-x86_64.tar.gz";
+const DEFAULT_APPIMAGE_URL: &str =
+    "https://github.com/Fuwia/goley-revival-linux/releases/latest/download/goley-revival-linux-x86_64.AppImage";
+
+#[derive(Debug, Clone, Deserialize)]
+struct GithubReleaseDto {
+    tag_name: String,
+    html_url: Option<String>,
+    body: Option<String>,
+    #[serde(default)]
+    assets: Vec<GithubAssetDto>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GithubAssetDto {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct LauncherReleaseInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub tag_name: String,
+    pub html_url: String,
+    pub body: String,
+    pub update_available: bool,
+    pub tarball_url: String,
+    pub appimage_url: String,
+}
+
+fn parse_semver_tuple(ver: &str) -> (u32, u32, u32) {
+    let cleaned = ver.trim().trim_start_matches('v').trim_start_matches('V');
+    let mut parts = cleaned
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty());
+    let major = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    (major, minor, patch)
+}
+
+pub fn check_github_launcher_update() -> Result<LauncherReleaseInfo, String> {
+    let client = build_http_client()?;
+    let dto: GithubReleaseDto = client
+        .get(GITHUB_LATEST_RELEASE_API)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .map_err(|e| format!("GitHub sunucusuna bağlanılamadı: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("GitHub sürüm bilgisi alınamadı: {}", e))?
+        .json()
+        .map_err(|e| format!("GitHub JSON yanıtı ayrıştırılamadı: {}", e))?;
+
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let latest_version = dto
+        .tag_name
+        .trim()
+        .trim_start_matches('v')
+        .trim_start_matches('V')
+        .to_string();
+
+    let cur_tuple = parse_semver_tuple(&current_version);
+    let lat_tuple = parse_semver_tuple(&latest_version);
+    let update_available = lat_tuple > cur_tuple;
+
+    let mut tarball_url = DEFAULT_TARBALL_URL.to_string();
+    let mut appimage_url = DEFAULT_APPIMAGE_URL.to_string();
+
+    for asset in &dto.assets {
+        if asset.name.ends_with(".tar.gz") {
+            tarball_url = asset.browser_download_url.clone();
+        } else if asset.name.ends_with(".AppImage") {
+            appimage_url = asset.browser_download_url.clone();
+        }
+    }
+
+    Ok(LauncherReleaseInfo {
+        current_version,
+        latest_version,
+        tag_name: dto.tag_name,
+        html_url: dto.html_url.unwrap_or_else(|| {
+            "https://github.com/Fuwia/goley-revival-linux/releases/latest".to_string()
+        }),
+        body: dto
+            .body
+            .filter(|b| !b.trim().is_empty())
+            .unwrap_or_else(|| "Yeni sürüm iyileştirmeleri ve hata düzeltmeleri.".to_string()),
+        update_available,
+        tarball_url,
+        appimage_url,
+    })
+}
+
+pub fn perform_launcher_self_update(info: &LauncherReleaseInfo) -> Result<PathBuf, String> {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    let client = build_http_client()?;
+
+    // Case 1: Running inside an AppImage
+    if let Ok(appimage_var) = std::env::var("APPIMAGE") {
+        let appimage_path = PathBuf::from(appimage_var.trim());
+        if !appimage_var.trim().is_empty() && appimage_path.is_file() {
+            let bytes = client
+                .get(&info.appimage_url)
+                .send()
+                .map_err(|e| format!("AppImage indirilemedi: {}", e))?
+                .error_for_status()
+                .map_err(|e| format!("AppImage indirme hatası: {}", e))?
+                .bytes()
+                .map_err(|e| format!("AppImage verisi okunamadı: {}", e))?;
+
+            if bytes.len() < 100_000 || &bytes[..4] != b"\x7fELF" {
+                return Err("İndirilen AppImage dosyası geçersiz görünüyor.".to_string());
+            }
+
+            let tmp_path = appimage_path.with_extension(format!("update_tmp_{}", std::process::id()));
+            fs::write(&tmp_path, &bytes)
+                .map_err(|e| format!("Geçici AppImage yazılamadı: {}", e))?;
+            let _ = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755));
+            fs::rename(&tmp_path, &appimage_path).map_err(|e| {
+                let _ = fs::remove_file(&tmp_path);
+                format!("AppImage dosyası güncellenemedi: {}", e)
+            })?;
+            return Ok(appimage_path);
+        }
+    }
+
+    // Case 2: Standard ELF binary installation (~/.local/bin, /usr/bin, or portable dir)
+    let tmp_dir = std::env::temp_dir().join(format!("goley-self-update-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp_dir);
+    fs::create_dir_all(&tmp_dir)
+        .map_err(|e| format!("Geçici güncelleme klasörü oluşturulamadı: {}", e))?;
+
+    let tarball_path = tmp_dir.join("release.tar.gz");
+    let bytes = client
+        .get(&info.tarball_url)
+        .send()
+        .map_err(|e| {
+            let _ = fs::remove_dir_all(&tmp_dir);
+            format!("Güncelleme paketi indirilemedi: {}", e)
+        })?
+        .error_for_status()
+        .map_err(|e| {
+            let _ = fs::remove_dir_all(&tmp_dir);
+            format!("Güncelleme paketi HTTP hatası: {}", e)
+        })?
+        .bytes()
+        .map_err(|e| {
+            let _ = fs::remove_dir_all(&tmp_dir);
+            format!("Güncelleme paketi okunamadı: {}", e)
+        })?;
+
+    fs::write(&tarball_path, &bytes).map_err(|e| {
+        let _ = fs::remove_dir_all(&tmp_dir);
+        format!("Arşiv diske yazılamadı: {}", e)
+    })?;
+
+    let status = Command::new("tar")
+        .arg("-xzf")
+        .arg(&tarball_path)
+        .arg("-C")
+        .arg(&tmp_dir)
+        .status()
+        .map_err(|e| {
+            let _ = fs::remove_dir_all(&tmp_dir);
+            format!("'tar' komutu çalıştırılamadı: {}", e)
+        })?;
+
+    if !status.success() {
+        let _ = fs::remove_dir_all(&tmp_dir);
+        return Err("İndirilen güncelleme arşivi çıkartılamadı.".to_string());
+    }
+
+    let extracted_bin = tmp_dir.join("goley-revival-linux");
+    let bin_bytes = fs::read(&extracted_bin).map_err(|e| {
+        let _ = fs::remove_dir_all(&tmp_dir);
+        format!("Çıkartılan ikili dosya okunamadı: {}", e)
+    })?;
+
+    if bin_bytes.len() < 100_000 || &bin_bytes[..4] != b"\x7fELF" {
+        let _ = fs::remove_dir_all(&tmp_dir);
+        return Err("Çıkartılan başlatıcı dosyası geçerli bir ELF ikilisi değil.".to_string());
+    }
+    let _ = fs::set_permissions(&extracted_bin, fs::Permissions::from_mode(0o755));
+
+    let cur_exe = std::env::current_exe()
+        .unwrap_or_else(|_| PathBuf::from("/usr/bin/goley-revival-linux"));
+
+    // Try atomic in-place replacement in current_exe's directory first
+    let staged_near_exe = cur_exe.with_extension(format!("new_{}", std::process::id()));
+    if fs::write(&staged_near_exe, &bin_bytes).is_ok() {
+        let _ = fs::set_permissions(&staged_near_exe, fs::Permissions::from_mode(0o755));
+        if fs::rename(&staged_near_exe, &cur_exe).is_ok() {
+            let _ = fs::remove_dir_all(&tmp_dir);
+            return Ok(cur_exe);
+        }
+        let _ = fs::remove_file(&staged_near_exe);
+    }
+
+    // If current_exe is in a root-owned path (e.g. /usr/bin), try pkexec first
+    if crate::config::which_binary("pkexec").is_some() {
+        if let Ok(st) = Command::new("pkexec")
+            .args([
+                "install",
+                "-Dm755",
+                &extracted_bin.to_string_lossy(),
+                &cur_exe.to_string_lossy(),
+            ])
+            .status()
+        {
+            if st.success() {
+                let _ = fs::remove_dir_all(&tmp_dir);
+                return Ok(cur_exe);
+            }
+        }
+    }
+
+    // Fallback: install cleanly into ~/.local/bin/goley-revival-linux
+    if let Some(home) = dirs::home_dir() {
+        let local_bin_dir = home.join(".local/bin");
+        let _ = fs::create_dir_all(&local_bin_dir);
+        let target_bin = local_bin_dir.join("goley-revival-linux");
+        let staged_local = target_bin.with_extension(format!("new_{}", std::process::id()));
+        fs::write(&staged_local, &bin_bytes).map_err(|e| {
+            let _ = fs::remove_dir_all(&tmp_dir);
+            format!("~/.local/bin içine yazılamadı: {}", e)
+        })?;
+        let _ = fs::set_permissions(&staged_local, fs::Permissions::from_mode(0o755));
+        fs::rename(&staged_local, &target_bin).map_err(|e| {
+            let _ = fs::remove_file(&staged_local);
+            let _ = fs::remove_dir_all(&tmp_dir);
+            format!("~/.local/bin/goley-revival-linux güncellenemedi: {}", e)
+        })?;
+
+        // Also update desktop entry if extracted
+        let extracted_desktop = tmp_dir.join("io.github.fuwia.GoleyRevivalLinux.desktop");
+        if let Ok(desktop_raw) = fs::read_to_string(&extracted_desktop) {
+            let app_dir = home.join(".local/share/applications");
+            let _ = fs::create_dir_all(&app_dir);
+            let patched = desktop_raw
+                .lines()
+                .map(|l| {
+                    if l.starts_with("Exec=") {
+                        format!("Exec={}", target_bin.display())
+                    } else {
+                        l.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n";
+            let _ = fs::write(
+                app_dir.join("io.github.fuwia.GoleyRevivalLinux.desktop"),
+                patched,
+            );
+        }
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+        return Ok(target_bin);
+    }
+
+    let _ = fs::remove_dir_all(&tmp_dir);
+    Err("Güncelleme dosyası hedef konuma yerleştirilemedi.".to_string())
+}

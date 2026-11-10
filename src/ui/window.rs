@@ -1,7 +1,8 @@
 use crate::api::{
-    check_install_status_fast, fetch_portal_content, fetch_remote_manifests, format_bytes_human,
-    format_turkish_date, verify_and_patch, LocalInstallState, NewsItem, PatchProgress,
-    PreparedSlide, RemoteManifests,
+    check_github_launcher_update, check_install_status_fast, fetch_portal_content,
+    fetch_remote_manifests, format_bytes_human, format_turkish_date, verify_and_patch,
+    LauncherReleaseInfo, LocalInstallState, NewsItem, PatchProgress, PreparedSlide,
+    RemoteManifests,
 };
 use crate::config::AppConfig;
 use crate::prefix::{
@@ -13,7 +14,7 @@ use crate::runner::{
 };
 use crate::ui::dialogs::{
     open_uri_or_path, present_login_dialog, present_logs_dialog, present_news_dialog,
-    present_preferences_dialog,
+    present_preferences_dialog, present_updater_dialog,
 };
 use crate::ui::style::{apply_color_scheme, load_css};
 use adw::prelude::*;
@@ -39,6 +40,7 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
 
     let config_rc = Rc::new(RefCell::new(initial_cfg));
     let manifests_rc: Rc<RefCell<Option<RemoteManifests>>> = Rc::new(RefCell::new(None));
+    let release_info_rc: Rc<RefCell<Option<LauncherReleaseInfo>>> = Rc::new(RefCell::new(None));
     let slides_rc: Rc<RefCell<Vec<PreparedSlide>>> = Rc::new(RefCell::new(Vec::new()));
     let slide_idx_rc = Rc::new(Cell::new(0usize));
     let session_logs_rc: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
@@ -108,6 +110,16 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
     account_popover.set_child(Some(&pop_box));
     account_menu_btn.set_popover(Some(&account_popover));
 
+    let self_upd_content = adw::ButtonContent::builder()
+        .icon_name("software-update-available-symbolic")
+        .label("Güncelle")
+        .build();
+    let btn_self_update = gtk::Button::builder()
+        .child(&self_upd_content)
+        .tooltip_text("GitHub üzerinden başlatıcı güncellemelerini denetle ve indir")
+        .build();
+    btn_self_update.add_css_class("flat");
+
     let btn_refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
     btn_refresh.set_tooltip_text(Some("Duyuruları ve Güncellemeleri Yenile"));
 
@@ -120,6 +132,7 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
     header.pack_end(&btn_prefs);
     header.pack_end(&btn_logs);
     header.pack_end(&btn_refresh);
+    header.pack_end(&btn_self_update);
     header.pack_end(&account_menu_btn);
     toolbar_view.add_top_bar(&header);
 
@@ -929,6 +942,9 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
         let h_desc = hero_desc.clone();
         let win_weak = window.downgrade();
         let toast_ov = toast_overlay.clone();
+        let rel_store = Rc::clone(&release_info_rc);
+        let btn_upd_c = btn_self_update.clone();
+        let upd_content_c = self_upd_content.clone();
 
         Rc::new(move || {
             let (tx_portal, rx_portal) =
@@ -941,6 +957,38 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
                 async_channel::bounded::<Result<RemoteManifests, String>>(1);
             std::thread::spawn(move || {
                 let _ = tx_man.send_blocking(fetch_remote_manifests());
+            });
+
+            let (tx_rel, rx_rel) =
+                async_channel::bounded::<Result<LauncherReleaseInfo, String>>(1);
+            std::thread::spawn(move || {
+                let _ = tx_rel.send_blocking(check_github_launcher_update());
+            });
+
+            let rel_c = Rc::clone(&rel_store);
+            let btn_u = btn_upd_c.clone();
+            let content_u = upd_content_c.clone();
+            glib::spawn_future_local(async move {
+                if let Ok(Ok(info)) = rx_rel.recv().await {
+                    if info.update_available {
+                        content_u.set_label(&format!("Güncelle (v{})", info.latest_version));
+                        btn_u.remove_css_class("flat");
+                        btn_u.add_css_class("suggested-action");
+                        btn_u.set_tooltip_text(Some(&format!(
+                            "Yeni sürüm mevcut: v{} (Mevcut: v{})",
+                            info.latest_version, info.current_version
+                        )));
+                    } else {
+                        content_u.set_label("Güncelle");
+                        btn_u.remove_css_class("suggested-action");
+                        btn_u.add_css_class("flat");
+                        btn_u.set_tooltip_text(Some(&format!(
+                            "Başlatıcı güncel (v{}) — GitHub güncellemelerini denetle",
+                            info.current_version
+                        )));
+                    }
+                    *rel_c.borrow_mut() = Some(info);
+                }
             });
 
             let slides_c = Rc::clone(&slides_store);
@@ -1172,6 +1220,18 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
                 Err(e) => {
                     toast_ov.add_toast(adw::Toast::new(&format!("Oturum silinemedi: {}", e)));
                 }
+            }
+        });
+    }
+
+    // Self-Update button
+    {
+        let win_weak = window.downgrade();
+        let rel_rc = Rc::clone(&release_info_rc);
+        let toast_ov = toast_overlay.clone();
+        btn_self_update.connect_clicked(move |_| {
+            if let Some(w) = win_weak.upgrade() {
+                present_updater_dialog(&w, rel_rc.borrow().clone(), &toast_ov);
             }
         });
     }

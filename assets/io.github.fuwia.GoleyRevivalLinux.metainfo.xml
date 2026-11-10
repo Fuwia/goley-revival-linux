@@ -17,6 +17,15 @@
     <name>Fuwia</name>
   </developer>
   <releases>
+    <release version="0.1.7" date="2026-11-10">
+      <description>
+        <ul>
+          <li>Fix fullscreen resolution lock on 1080p/1200p+ monitors by preserving selected D3D9 backbuffer resolution in borderless fullscreen mode with hardware upscaling and accurate mouse coordinate scaling.</li>
+          <li>Expose all standard 16:9, 16:10, and 4:3 resolutions in in-game graphics settings under Wayland/XWayland.</li>
+          <li>Add one-click self-update button ("Güncelle") to check for and install launcher updates directly from GitHub Releases.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.6" date="2026-11-08">
       <description>
         <ul>

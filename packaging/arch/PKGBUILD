@@ -1,6 +1,6 @@
 # Maintainer: Fuwia <byfuria93@gmail.com>
 pkgname=goley-revival-linux
-pkgver=0.1.6
+pkgver=0.1.7
 pkgrel=1
 pkgdesc="Goley Revival için doğal GTK4 + Libadwaita Linux başlatıcısı (ECDSA ncrypt köprüsü, DXVK ve gizli arka plan modu)"
 arch=('x86_64')

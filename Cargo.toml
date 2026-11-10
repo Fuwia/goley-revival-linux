@@ -1,6 +1,6 @@
 [package]
 name = "goley-revival-linux"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 authors = ["Fuwia"]
 description = "Goley Revival için doğal GTK4 + Libadwaita Linux başlatıcısı (An Anime Game Launcher / Faugus tarzı)"

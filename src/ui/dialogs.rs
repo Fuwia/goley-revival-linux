@@ -1,4 +1,7 @@
-use crate::api::{fetch_news_detail, format_turkish_date, NewsItem};
+use crate::api::{
+    check_github_launcher_update, fetch_news_detail, format_turkish_date,
+    perform_launcher_self_update, LauncherReleaseInfo, NewsItem,
+};
 use crate::config::{which_binary, AppConfig};
 use crate::prefix::{
     discover_runners, install_ncrypt_shims, revival_game_dir, revival_launcher_log_path,
@@ -739,6 +742,32 @@ pub fn present_preferences_dialog<FRepair, FVerify>(
     }
     row_physx.add_suffix(&btn_physx);
     group_fixes.add(&row_physx);
+
+    let row_self_upd = adw::ActionRow::builder()
+        .title(&format!(
+            "Başlatıcı Güncelleme (Mevcut: v{})",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .subtitle("GitHub Releases üzerinden en son başlatıcı sürümünü ve ncrypt yamalarını çeker")
+        .build();
+    let btn_self_upd = gtk::Button::with_label("Güncellemeleri Denetle");
+    btn_self_upd.set_valign(gtk::Align::Center);
+    {
+        let prefs_weak = prefs.downgrade();
+        let win_weak = window.downgrade();
+        let toast_ov = toast_overlay.clone();
+        btn_self_upd.connect_clicked(move |_| {
+            if let Some(p) = prefs_weak.upgrade() {
+                p.close();
+            }
+            if let Some(w) = win_weak.upgrade() {
+                present_updater_dialog(&w, None, &toast_ov);
+            }
+        });
+    }
+    row_self_upd.add_suffix(&btn_self_upd);
+    group_fixes.add(&row_self_upd);
+
     page_maint.add(&group_fixes);
 
     let group_debug = adw::PreferencesGroup::builder()
@@ -764,4 +793,220 @@ pub fn present_preferences_dialog<FRepair, FVerify>(
 
     prefs.add(&page_maint);
     prefs.present(Some(window));
+}
+
+pub fn present_updater_dialog(
+    window: &adw::ApplicationWindow,
+    cached_info: Option<LauncherReleaseInfo>,
+    toast_overlay: &adw::ToastOverlay,
+) {
+    let dialog = adw::Dialog::builder()
+        .title("Başlatıcı Güncelleme (GitHub)")
+        .content_width(520)
+        .content_height(430)
+        .build();
+
+    let toolbar = adw::ToolbarView::new();
+    let header = adw::HeaderBar::new();
+    toolbar.add_top_bar(&header);
+
+    let outer = gtk::Box::new(gtk::Orientation::Vertical, 14);
+    outer.set_margin_top(14);
+    outer.set_margin_bottom(20);
+    outer.set_margin_start(22);
+    outer.set_margin_end(22);
+
+    let status_group = adw::PreferencesGroup::new();
+    let cur_row = adw::ActionRow::builder()
+        .title("Yüklü Başlatıcı Sürümü")
+        .subtitle(&format!("v{}", env!("CARGO_PKG_VERSION")))
+        .build();
+    let remote_row = adw::ActionRow::builder()
+        .title("GitHub Son Sürüm")
+        .subtitle("Denetleniyor...")
+        .build();
+
+    let spinner = gtk::Spinner::new();
+    spinner.set_valign(gtk::Align::Center);
+    spinner.start();
+    remote_row.add_suffix(&spinner);
+
+    status_group.add(&cur_row);
+    status_group.add(&remote_row);
+    outer.append(&status_group);
+
+    let notes_lbl_hdr = gtk::Label::new(Some("Sürüm Notları"));
+    notes_lbl_hdr.add_css_class("heading");
+    notes_lbl_hdr.set_xalign(0.0);
+    outer.append(&notes_lbl_hdr);
+
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vexpand(true)
+        .build();
+    let notes_view = gtk::TextView::builder()
+        .editable(false)
+        .wrap_mode(gtk::WrapMode::WordChar)
+        .top_margin(10)
+        .bottom_margin(10)
+        .left_margin(12)
+        .right_margin(12)
+        .build();
+    notes_view.add_css_class("card");
+    notes_view
+        .buffer()
+        .set_text("GitHub Releases üzerinden en son sürüm bilgileri alınıyor...");
+    scroller.set_child(Some(&notes_view));
+    outer.append(&scroller);
+
+    let btn_row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    let btn_github = gtk::Button::with_label("GitHub Sayfasını Aç");
+    btn_github.add_css_class("flat");
+
+    let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+
+    let btn_apply = gtk::Button::with_label("Denetleniyor...");
+    btn_apply.add_css_class("suggested-action");
+    btn_apply.add_css_class("pill");
+    btn_apply.set_sensitive(false);
+
+    btn_row.append(&btn_github);
+    btn_row.append(&spacer);
+    btn_row.append(&btn_apply);
+    outer.append(&btn_row);
+
+    toolbar.set_content(Some(&outer));
+    dialog.set_child(Some(&toolbar));
+    dialog.present(Some(window));
+
+    let info_rc: Rc<RefCell<Option<LauncherReleaseInfo>>> = Rc::new(RefCell::new(None));
+
+    {
+        let win_weak = window.downgrade();
+        let info_c = Rc::clone(&info_rc);
+        btn_github.connect_clicked(move |_| {
+            if let Some(w) = win_weak.upgrade() {
+                let url = info_c
+                    .borrow()
+                    .as_ref()
+                    .map(|i| i.html_url.clone())
+                    .unwrap_or_else(|| {
+                        "https://github.com/Fuwia/goley-revival-linux/releases".to_string()
+                    });
+                open_uri_or_path(&w, &url);
+            }
+        });
+    }
+
+    let populate_ui = {
+        let rem_r = remote_row.clone();
+        let spin = spinner.clone();
+        let nv = notes_view.clone();
+        let btn = btn_apply.clone();
+        let info_store = Rc::clone(&info_rc);
+        move |res: Result<LauncherReleaseInfo, String>| {
+            spin.stop();
+            spin.set_visible(false);
+            match res {
+                Ok(info) => {
+                    if info.update_available {
+                        rem_r.set_subtitle(&format!(
+                            "{} — Yeni Güncelleme Mevcut!",
+                            info.tag_name
+                        ));
+                        btn.set_label(&format!("Şimdi Güncelle ({})", info.tag_name));
+                    } else {
+                        rem_r.set_subtitle(&format!("{} — Güncel", info.tag_name));
+                        btn.set_label(&format!("Yeniden İndir / Onar ({})", info.tag_name));
+                    }
+                    nv.buffer().set_text(&info.body);
+                    btn.set_sensitive(true);
+                    *info_store.borrow_mut() = Some(info);
+                }
+                Err(err) => {
+                    rem_r.set_subtitle("Bağlantı hatası");
+                    nv.buffer().set_text(&err);
+                    btn.set_label("Tekrar Dene");
+                    btn.set_sensitive(false);
+                }
+            }
+        }
+    };
+
+    if let Some(info) = cached_info {
+        populate_ui(Ok(info));
+    } else {
+        let (tx, rx) = async_channel::bounded(1);
+        std::thread::spawn(move || {
+            let _ = tx.send_blocking(check_github_launcher_update());
+        });
+        glib::spawn_future_local(async move {
+            if let Ok(res) = rx.recv().await {
+                populate_ui(res);
+            }
+        });
+    }
+
+    {
+        let info_c = Rc::clone(&info_rc);
+        let spin = spinner.clone();
+        let rem_r = remote_row.clone();
+        let toast_ov = toast_overlay.clone();
+        let dlg_weak = dialog.downgrade();
+        let win_weak = window.downgrade();
+
+        btn_apply.connect_clicked(move |btn| {
+            let Some(info) = info_c.borrow().clone() else {
+                return;
+            };
+            btn.set_sensitive(false);
+            btn.set_label("İndiriliyor ve Kuruluyor...");
+            spin.set_visible(true);
+            spin.start();
+            rem_r.set_subtitle("GitHub Releases üzerinden yeni sürüm indiriliyor...");
+
+            let (tx, rx) = async_channel::bounded(1);
+            std::thread::spawn(move || {
+                let _ = tx.send_blocking(perform_launcher_self_update(&info));
+            });
+
+            let btn_c = btn.clone();
+            let spin_c = spin.clone();
+            let rem_c = rem_r.clone();
+            let toast_c = toast_ov.clone();
+            let dlg_w = dlg_weak.clone();
+            let win_w = win_weak.clone();
+
+            glib::spawn_future_local(async move {
+                if let Ok(res) = rx.recv().await {
+                    spin_c.stop();
+                    spin_c.set_visible(false);
+                    match res {
+                        Ok(new_exe_path) => {
+                            toast_c.add_toast(adw::Toast::new(
+                                "Güncelleme tamamlandı! Başlatıcı yeniden başlatılıyor...",
+                            ));
+                            if let Some(d) = dlg_w.upgrade() {
+                                d.close();
+                            }
+                            let _ = Command::new(&new_exe_path).spawn();
+                            if let Some(w) = win_w.upgrade() {
+                                if let Some(app) = w.application() {
+                                    app.quit();
+                                }
+                            }
+                            std::process::exit(0);
+                        }
+                        Err(err) => {
+                            rem_c.set_subtitle("Güncelleme başarısız oldu");
+                            btn_c.set_sensitive(true);
+                            btn_c.set_label("Tekrar Dene");
+                            toast_c.add_toast(adw::Toast::new(&err));
+                        }
+                    }
+                }
+            });
+        });
+    }
 }
