@@ -589,11 +589,9 @@ fn build_runner_command(
             cmd.env("FAUGUSID", "revival");
             cmd.env("LOG_DIR", "revival");
             if let Some(pdir) = proton_dir {
-                if let Some(name) = pdir.file_name().and_then(|s| s.to_str()) {
-                    cmd.env("PROTONPATH", name);
-                } else {
-                    cmd.env("PROTONPATH", pdir);
-                }
+                // umu 1.4.x, yalnızca klasör adını (ör. "proton-ge-custom") çözemiyor;
+                // her zaman tam yol ver.
+                cmd.env("PROTONPATH", pdir);
             }
             apply_common_envs(&mut cmd, cfg);
             Ok(cmd)
