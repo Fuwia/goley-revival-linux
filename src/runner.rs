@@ -46,6 +46,72 @@ struct LaunchWatch {
     phase: &'static str,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeStateSnapshot {
+    pub log_len: u64,
+    pub status_content: Option<String>,
+}
+
+pub fn has_bridge_progress(last: &BridgeStateSnapshot, current: &BridgeStateSnapshot) -> bool {
+    current.log_len > last.log_len || current.status_content != last.status_content
+}
+
+#[cfg(test)]
+mod bridge_tests {
+    use super::*;
+
+    #[test]
+    fn bridge_progress_detected_on_log_growth() {
+        let s1 = BridgeStateSnapshot {
+            log_len: 100,
+            status_content: None,
+        };
+        let s2 = BridgeStateSnapshot {
+            log_len: 120,
+            status_content: None,
+        };
+        assert!(has_bridge_progress(&s1, &s2));
+    }
+
+    #[test]
+    fn bridge_progress_detected_on_status_change() {
+        let s1 = BridgeStateSnapshot {
+            log_len: 100,
+            status_content: None,
+        };
+        let s2 = BridgeStateSnapshot {
+            log_len: 100,
+            status_content: Some("BUSY".into()),
+        };
+        assert!(has_bridge_progress(&s1, &s2));
+
+        let s3 = BridgeStateSnapshot {
+            log_len: 100,
+            status_content: Some("READY".into()),
+        };
+        assert!(has_bridge_progress(&s2, &s3));
+    }
+
+    #[test]
+    fn bridge_no_progress_when_unchanged_or_shrunk() {
+        let s1 = BridgeStateSnapshot {
+            log_len: 100,
+            status_content: Some("IDLE".into()),
+        };
+        let s2 = BridgeStateSnapshot {
+            log_len: 100,
+            status_content: Some("IDLE".into()),
+        };
+        assert!(!has_bridge_progress(&s1, &s2));
+
+        let shrunk = BridgeStateSnapshot {
+            log_len: 50,
+            status_content: Some("IDLE".into()),
+        };
+        assert!(!has_bridge_progress(&s1, &shrunk));
+    }
+}
+
 impl LaunchWatch {
     fn new(existing_launcher: bool, phase: &'static str) -> Self {
         Self {
@@ -332,8 +398,32 @@ fn run_session_inner(
         None
     };
     let mut ticket_requested = false;
+    let status_path = revival_local_appdata_dir(prefix).join("goley_bridge_status.txt");
+    let mut bridge_cmd_sent = existing_launcher_pid.is_some();
+    let mut last_bridge_progress_at = Instant::now();
+    let mut last_bridge_snapshot = BridgeStateSnapshot {
+        log_len: fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0),
+        status_content: fs::read_to_string(&status_path).ok(),
+    };
 
     loop {
+        let cur_snapshot = BridgeStateSnapshot {
+            log_len: fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0),
+            status_content: fs::read_to_string(&status_path).ok(),
+        };
+        if has_bridge_progress(&last_bridge_snapshot, &cur_snapshot) {
+            last_bridge_snapshot = cur_snapshot;
+            last_bridge_progress_at = Instant::now();
+        } else if bridge_cmd_sent && last_bridge_progress_at.elapsed() >= Duration::from_secs(20) {
+            let err_msg = format!(
+                "Gizli başlatıcı komuta yanıt vermiyor. Wine kullanıcı klasörü: {}. Log: {}",
+                revival_local_appdata_dir(prefix).display(),
+                log_path.display()
+            );
+            let _ = tx.send_blocking(RunnerEvent::LogLine(err_msg.clone()));
+            stop_launcher_only(prefix);
+            return Err(err_msg);
+        }
         // Check if BinaryTrU.exe is already running!
         let (game_pid, launcher_pid) = find_running_pids();
         if let Some(gpid) = game_pid {
@@ -443,6 +533,8 @@ fn run_session_inner(
                             send_bridge_command(prefix, "PLAY\n")?;
                             watch.phase = "OYNA komutuna yanıt";
                             play_sent_at = Some(Instant::now());
+                            bridge_cmd_sent = true;
+                            last_bridge_progress_at = Instant::now();
                         } else if trimmed.contains("AuthClient: ticket requested") {
                             watch.phase = "sunucudan giriş bileti yanıtı";
                             ticket_requested = true;
@@ -510,6 +602,8 @@ fn run_session_inner(
                             prefix,
                             &format!("LOGIN\t{}\t{}\n", c.username, c.password),
                         )?;
+                        bridge_cmd_sent = true;
+                        last_bridge_progress_at = Instant::now();
                     }
                 } else if elapsed_ready >= Duration::from_millis(300) {
                     let _ = tx.send_blocking(RunnerEvent::NeedLogin { reason: None });
@@ -524,6 +618,8 @@ fn run_session_inner(
                 send_bridge_command(prefix, "PLAY\n")?;
                 watch.phase = "OYNA komutuna yanıt";
                 play_sent_at = Some(Instant::now());
+                bridge_cmd_sent = true;
+                last_bridge_progress_at = Instant::now();
             } else if let Some(sent_time) = play_sent_at {
                 // Retry PLAY if ticket wasn't requested after 2.4s (e.g., session restore just finished)
                 if !ticket_requested && sent_time.elapsed() >= Duration::from_millis(2400) {
