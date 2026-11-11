@@ -258,6 +258,17 @@ pub fn fetch_remote_manifests() -> Result<RemoteManifests, String> {
     })
 }
 
+/// Oyunun kendi yazdığı/yeniden yazdığı dosyalar (Option.ini, shader'lar vb.) manifestteki varsayılandan
+/// farklı boyutta olur; var olduktan sonra "eksik/güncel değil" sayılmamalı.
+fn is_user_settings_file(rel: &str) -> bool {
+    let norm = rel.replace('\\', "/");
+    // Oyun, shader dosyalarının ilk satırındaki `#line` yolunu kendi kurulum yoluyla
+    // yeniden yazar; boyut manifestten farklı çıkar ama içerik aynıdır.
+    let is_game_rewritten_shader = norm.starts_with("Data/DefaultShader/") && norm.ends_with(".hlsl");
+    is_game_rewritten_shader
+        || crate::userdata::PROTECTED_FILES.iter().any(|p| p.eq_ignore_ascii_case(&norm))
+}
+
 pub fn check_install_status_fast(prefix: &Path, manifests: &RemoteManifests) -> LocalInstallState {
     let rev_root = revival_root_dir(prefix);
     let game_dir = revival_game_dir(prefix);
@@ -293,6 +304,9 @@ pub fn check_install_status_fast(prefix: &Path, manifests: &RemoteManifests) -> 
 
     for f in &manifests.game.files {
         let local_path = game_dir.join(&f.path);
+        if is_user_settings_file(&f.path) && local_path.is_file() {
+            continue;
+        }
         match fs::metadata(&local_path) {
             Ok(meta) if meta.is_file() && meta.len() == f.size => {}
             _ => {
@@ -367,6 +381,7 @@ where
         });
 
         let needs_dl = match fs::metadata(&task.dest_path) {
+            Ok(meta) if meta.is_file() && is_user_settings_file(&task.rel_name) => false,
             Ok(meta) if meta.is_file() && meta.len() == task.size => {
                 if full_sha256_check {
                     match compute_file_sha256(&task.dest_path) {
