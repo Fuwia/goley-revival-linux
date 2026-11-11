@@ -3,6 +3,7 @@ mod config;
 mod prefix;
 mod runner;
 mod ui;
+mod userdata;
 
 use adw::prelude::*;
 use std::env;
