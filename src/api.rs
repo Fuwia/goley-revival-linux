@@ -498,7 +498,11 @@ fn download_single_object(
         .error_for_status()
         .map_err(|e| format!("CDN HTTP hatası ({}): {}", task.rel_name, e))?;
 
-    let tmp_path = task.dest_path.with_extension("goley_part");
+    // Uzantıyı değiştirmek yerine tam dosya adına ekle; aynı gövdeli dosyalar
+    // (ör. Stadium.VLH / Stadium.VLD) paralel indirmede aynı geçici adı paylaşmasın.
+    let mut tmp_name = task.dest_path.as_os_str().to_owned();
+    tmp_name.push(".goley_part");
+    let tmp_path = PathBuf::from(tmp_name);
     let mut out_file = fs::File::create(&tmp_path)
         .map_err(|e| format!("Dosya oluşturulamadı ({}): {}", task.rel_name, e))?;
 
