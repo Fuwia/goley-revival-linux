@@ -121,7 +121,7 @@ pub fn select_runner(preferred_id: &str) -> Option<RunnerOption> {
     runners.into_iter().next()
 }
 
-fn find_umu_bin() -> Option<PathBuf> {
+pub(crate) fn find_umu_bin() -> Option<PathBuf> {
     if let Some(home) = dirs::home_dir() {
         let faugus_umu = home.join(".local/share/faugus-launcher/umu-run");
         if faugus_umu.is_file() {
@@ -144,7 +144,7 @@ fn find_umu_bin() -> Option<PathBuf> {
     None
 }
 
-fn find_proton_dirs() -> Vec<PathBuf> {
+pub(crate) fn find_proton_dirs() -> Vec<PathBuf> {
     let mut dirs_found = Vec::new();
     let mut roots = vec![
         PathBuf::from("/usr/share/steam/compatibilitytools.d"),
