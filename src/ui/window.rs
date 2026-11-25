@@ -13,8 +13,8 @@ use crate::runner::{
     launch_headless_session, stop_running_game, LoginCredentials, RunnerEvent,
 };
 use crate::ui::dialogs::{
-    open_uri_or_path, present_login_dialog, present_logs_dialog, present_news_dialog,
-    present_preferences_dialog, present_updater_dialog,
+    open_uri_or_path, present_about_dialog, present_login_dialog, present_logs_dialog,
+    present_news_dialog, present_preferences_dialog, present_updater_dialog,
 };
 use crate::ui::style::{apply_color_scheme, load_css};
 use adw::prelude::*;
@@ -129,6 +129,10 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
     let btn_prefs = gtk::Button::from_icon_name("emblem-system-symbolic");
     btn_prefs.set_tooltip_text(Some("Başlatıcı Ayarları"));
 
+    let btn_about = gtk::Button::from_icon_name("help-about-symbolic");
+    btn_about.set_tooltip_text(Some("Hakkında & Emeği Geçenler"));
+
+    header.pack_end(&btn_about);
     header.pack_end(&btn_prefs);
     header.pack_end(&btn_logs);
     header.pack_end(&btn_refresh);
@@ -1281,6 +1285,16 @@ pub fn build_ui(app: &adw::Application, snapshot_target: Option<String>) {
                     move || badges_cb(),
                     move || verify_cb(true),
                 );
+            }
+        });
+    }
+
+    // About / Credits button
+    {
+        let win_weak = window.downgrade();
+        btn_about.connect_clicked(move |_| {
+            if let Some(w) = win_weak.upgrade() {
+                present_about_dialog(&w);
             }
         });
     }

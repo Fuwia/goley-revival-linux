@@ -324,6 +324,7 @@ curl -fsSL https://raw.githubusercontent.com/Fuwia/goley-revival-linux/main/unin
 
 Bu proje topluluk tarafından Linux oyuncularının Goley Revival'ı özgür ve akıcı şekilde oynayabilmesi için geliştirilmiştir; resmi Goley Revival yönetimi ile doğrudan bir bağı yoktur.
 
+- **Katkıda Bulunanlar:** [@canbmaj7](https://github.com/canbmaj7), **nashin**
 - **ncrypt Köprüsü Kaynak Kodu:** [`ncrypt-shim/ncrypt_shim.c`](ncrypt-shim/ncrypt_shim.c)
 - **GTK4 + Libadwaita Arayüzü:** [`src/`](src/)
 - **Lisans:** [GNU General Public License v3.0 (GPL-3.0)](LICENSE)

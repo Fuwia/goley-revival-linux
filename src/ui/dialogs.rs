@@ -846,7 +846,116 @@ pub fn present_preferences_dialog<FRepair, FVerify>(
     page_maint.add(&group_debug);
 
     prefs.add(&page_maint);
+
+    // ── Page 3: Hakkında & Emeği Geçenler (Credits) ───────────────────────
+    let page_about = adw::PreferencesPage::builder()
+        .title("Hakkında")
+        .icon_name("help-about-symbolic")
+        .build();
+
+    let group_credits = adw::PreferencesGroup::builder()
+        .title("Emeği Geçenler (Credits)")
+        .description("Goley Revival Linux başlatıcısının geliştirilmesine katkıda bulunanlar")
+        .build();
+
+    let row_dev = adw::ActionRow::builder()
+        .title("Fuwia")
+        .subtitle("Geliştirici")
+        .build();
+    let dev_icon = gtk::Image::from_icon_name("avatar-default-symbolic");
+    row_dev.add_prefix(&dev_icon);
+    let btn_dev_gh = gtk::Button::with_label("GitHub");
+    btn_dev_gh.set_valign(gtk::Align::Center);
+    btn_dev_gh.add_css_class("flat");
+    {
+        let win_weak = window.downgrade();
+        btn_dev_gh.connect_clicked(move |_| {
+            if let Some(w) = win_weak.upgrade() {
+                open_uri_or_path(&w, "https://github.com/Fuwia");
+            }
+        });
+    }
+    row_dev.add_suffix(&btn_dev_gh);
+    group_credits.add(&row_dev);
+
+    let row_canbmaj7 = adw::ActionRow::builder()
+        .title("canbmaj7")
+        .subtitle("Katkıda Bulunan (Contributor)")
+        .build();
+    let c1_icon = gtk::Image::from_icon_name("avatar-default-symbolic");
+    row_canbmaj7.add_prefix(&c1_icon);
+    let btn_canbmaj7_gh = gtk::Button::with_label("GitHub");
+    btn_canbmaj7_gh.set_valign(gtk::Align::Center);
+    btn_canbmaj7_gh.add_css_class("flat");
+    {
+        let win_weak = window.downgrade();
+        btn_canbmaj7_gh.connect_clicked(move |_| {
+            if let Some(w) = win_weak.upgrade() {
+                open_uri_or_path(&w, "https://github.com/canbmaj7");
+            }
+        });
+    }
+    row_canbmaj7.add_suffix(&btn_canbmaj7_gh);
+    group_credits.add(&row_canbmaj7);
+
+    let row_nashin = adw::ActionRow::builder()
+        .title("nashin")
+        .subtitle("Katkıda Bulunan (Contributor)")
+        .build();
+    let c2_icon = gtk::Image::from_icon_name("avatar-default-symbolic");
+    row_nashin.add_prefix(&c2_icon);
+    group_credits.add(&row_nashin);
+
+    page_about.add(&group_credits);
+
+    let group_app = adw::PreferencesGroup::builder()
+        .title("Uygulama Bilgisi")
+        .build();
+
+    let row_app_info = adw::ActionRow::builder()
+        .title("Goley Revival Linux")
+        .subtitle(&format!("Sürüm v{} · GPL-3.0", env!("CARGO_PKG_VERSION")))
+        .build();
+    let btn_open_about = gtk::Button::with_label("Hakkında");
+    btn_open_about.set_valign(gtk::Align::Center);
+    {
+        let prefs_weak = prefs.downgrade();
+        let win_weak = window.downgrade();
+        btn_open_about.connect_clicked(move |_| {
+            if let Some(p) = prefs_weak.upgrade() {
+                p.close();
+            }
+            if let Some(w) = win_weak.upgrade() {
+                present_about_dialog(&w);
+            }
+        });
+    }
+    row_app_info.add_suffix(&btn_open_about);
+    group_app.add(&row_app_info);
+
+    page_about.add(&group_app);
+    prefs.add(&page_about);
+
     prefs.present(Some(window));
+}
+
+pub fn present_about_dialog(window: &adw::ApplicationWindow) {
+    let about = adw::AboutDialog::builder()
+        .application_name("Goley Revival Linux")
+        .application_icon("io.github.fuwia.GoleyRevivalLinux")
+        .developer_name("Fuwia")
+        .version(env!("CARGO_PKG_VERSION"))
+        .website("https://github.com/Fuwia/goley-revival-linux")
+        .issue_url("https://github.com/Fuwia/goley-revival-linux/issues")
+        .license_type(gtk::License::Gpl30)
+        .comments("Goley Revival için doğal GTK4 + Libadwaita Linux başlatıcısı.")
+        .developers(["Fuwia https://github.com/Fuwia"])
+        .build();
+    about.add_credit_section(
+        Some("Katkıda Bulunanlar"),
+        &["canbmaj7 https://github.com/canbmaj7", "nashin"],
+    );
+    about.present(Some(window));
 }
 
 pub fn present_updater_dialog(
