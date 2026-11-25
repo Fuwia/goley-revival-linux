@@ -256,8 +256,11 @@ fn run_session_inner(
             let mut map = std::collections::HashMap::new();
             for f in &manifests.game.files {
                 let normalized = f.path.replace('\\', "/");
-                if userdata::PROTECTED_FILES.contains(&normalized.as_str()) {
-                    map.insert(normalized, f.sha256.to_lowercase());
+                if let Some(canonical) = userdata::PROTECTED_FILES
+                    .iter()
+                    .find(|p| p.eq_ignore_ascii_case(&normalized))
+                {
+                    map.insert((*canonical).to_string(), f.sha256.to_lowercase());
                 }
             }
             map
@@ -444,7 +447,10 @@ fn run_session_inner(
         if has_bridge_progress(&last_bridge_snapshot, &cur_snapshot) {
             last_bridge_snapshot = cur_snapshot;
             last_bridge_progress_at = Instant::now();
-        } else if bridge_cmd_sent && last_bridge_progress_at.elapsed() >= Duration::from_secs(20) {
+        } else if bridge_cmd_sent
+            && !ticket_requested
+            && last_bridge_progress_at.elapsed() >= Duration::from_secs(20)
+        {
             let err_msg = format!(
                 "Gizli başlatıcı komuta yanıt vermiyor. Wine kullanıcı klasörü: {}. Log: {}",
                 revival_local_appdata_dir(prefix).display(),

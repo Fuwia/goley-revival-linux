@@ -523,17 +523,7 @@ fn parse_df_available(output: &str) -> Option<u64> {
 
 pub(crate) fn get_available_space(path: &Path) -> Option<u64> {
     use std::process::Command;
-    let target = if path.exists() {
-        path
-    } else if let Some(parent) = path.parent() {
-        if parent.exists() {
-            parent
-        } else {
-            path
-        }
-    } else {
-        path
-    };
+    let target = path.ancestors().find(|p| p.exists())?;
     let output = Command::new("df")
         .arg("-P")
         .arg("-B1")

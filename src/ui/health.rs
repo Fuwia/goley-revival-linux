@@ -97,7 +97,12 @@ pub fn check_wine_user_dir_exists(dir: &Path) -> CheckResult {
 }
 
 pub fn detect_32bit_gnutls() -> bool {
-    let candidates = ["/usr/lib32", "/usr/lib/i386-linux-gnu"];
+    let mut candidates: Vec<&str> = vec!["/usr/lib32", "/usr/lib/i386-linux-gnu"];
+    // Fedora / RHEL / openSUSE multilib layouts place 32-bit libs in /usr/lib while 64-bit lives in /usr/lib64.
+    let lib64 = Path::new("/usr/lib64");
+    if lib64.is_dir() && fs::read_link(lib64).is_err() {
+        candidates.push("/usr/lib");
+    }
     for dir in candidates {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
