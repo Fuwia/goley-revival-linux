@@ -718,10 +718,18 @@ pub fn present_preferences_dialog<FRepair, FVerify>(
             btn.set_sensitive(false);
             btn.set_label("Kuruluyor...");
             let pfx = cfg.borrow().prefix_path.clone();
+            let wine_user = crate::prefix::resolve_wine_user_dir(&pfx);
+            let user_name = wine_user
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("steamuser")
+                .to_string();
             let (tx, rx) = async_channel::bounded(1);
             std::thread::spawn(move || {
                 let res = Command::new("winetricks")
                     .env("WINEPREFIX", &pfx)
+                    .env("USER", &user_name)
+                    .env("LOGNAME", &user_name)
                     .args(["-q", "physx"])
                     .status();
                 let _ = tx.send_blocking(res.map(|s| s.success()).unwrap_or(false));

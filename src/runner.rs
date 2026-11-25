@@ -1,6 +1,7 @@
 use crate::config::{which_binary, AppConfig};
 use crate::prefix::{
-    atomic_write_file, find_running_pids, install_ncrypt_shims, revival_launcher_log_path,
+    atomic_write_file, find_running_pids, install_ncrypt_shims, resolve_wine_user_dir,
+    revival_launcher_log_path,
     revival_local_appdata_dir, revival_root_dir, select_runner, write_login_prefs_to_user_reg,
     RunnerKind,
 };
@@ -616,6 +617,13 @@ fn build_runner_command(
             base_args.push(launcher_exe.to_string_lossy().to_string());
             let mut cmd = assemble_wrapped_command(&wrappers, &base_args);
             cmd.env("WINEPREFIX", &cfg.prefix_path);
+            let wine_user = resolve_wine_user_dir(&cfg.prefix_path);
+            let user_name = wine_user
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("steamuser");
+            cmd.env("USER", user_name);
+            cmd.env("LOGNAME", user_name);
             apply_common_envs(&mut cmd, cfg);
             Ok(cmd)
         }
@@ -690,5 +698,58 @@ mod tests {
         assert!(!watch.launcher_exited(false, now + Duration::from_secs(5)));
         assert!(!watch.launcher_exited(false, now + Duration::from_secs(7)));
         assert!(watch.launcher_exited(false, now + Duration::from_secs(8)));
+    }
+
+    #[test]
+    fn test_wine_runner_command_sets_user_and_logname() {
+        let tmp = std::env::temp_dir().join(format!("goley_runner_wine_test_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp);
+        let mut cfg = AppConfig::default();
+        cfg.prefix_path = tmp.clone();
+
+        let kind = RunnerKind::Wine {
+            wine_bin: std::path::PathBuf::from("/usr/bin/wine"),
+        };
+        let launcher = tmp.join("revival_launcher.exe");
+        let cmd = build_runner_command(&cfg, &kind, &launcher).unwrap();
+
+        let envs: std::collections::HashMap<String, String> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| {
+                v.map(|val| (k.to_string_lossy().to_string(), val.to_string_lossy().to_string()))
+            })
+            .collect();
+
+        assert_eq!(envs.get("USER").map(|s| s.as_str()), Some("steamuser"));
+        assert_eq!(envs.get("LOGNAME").map(|s| s.as_str()), Some("steamuser"));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_wine_runner_command_sets_legacy_user_env() {
+        let tmp = std::env::temp_dir().join(format!("goley_runner_legacy_test_{}", std::process::id()));
+        let user_launcher_dir = tmp.join("drive_c/users/kullanici/AppData/Local/Programs/Revival");
+        let _ = fs::create_dir_all(&user_launcher_dir);
+        let _ = fs::write(user_launcher_dir.join("revival_launcher.exe"), b"");
+
+        let mut cfg = AppConfig::default();
+        cfg.prefix_path = tmp.clone();
+
+        let kind = RunnerKind::Wine {
+            wine_bin: std::path::PathBuf::from("/usr/bin/wine"),
+        };
+        let launcher = tmp.join("revival_launcher.exe");
+        let cmd = build_runner_command(&cfg, &kind, &launcher).unwrap();
+
+        let envs: std::collections::HashMap<String, String> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| {
+                v.map(|val| (k.to_string_lossy().to_string(), val.to_string_lossy().to_string()))
+            })
+            .collect();
+
+        assert_eq!(envs.get("USER").map(|s| s.as_str()), Some("kullanici"));
+        assert_eq!(envs.get("LOGNAME").map(|s| s.as_str()), Some("kullanici"));
+        let _ = fs::remove_dir_all(&tmp);
     }
 }
