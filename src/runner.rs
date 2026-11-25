@@ -5,6 +5,7 @@ use crate::prefix::{
     revival_local_appdata_dir, revival_root_dir, select_runner, write_login_prefs_to_user_reg,
     RunnerKind,
 };
+use crate::userdata;
 use async_channel::Sender;
 use std::fs;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -184,6 +185,30 @@ fn run_session_inner(
         std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "bilinmiyor".into()),
     )));
 
+    let pristine: std::collections::HashMap<String, String> = match crate::api::fetch_remote_manifests() {
+        Ok(manifests) => {
+            let mut map = std::collections::HashMap::new();
+            for f in &manifests.game.files {
+                let normalized = f.path.replace('\\', "/");
+                if userdata::PROTECTED_FILES.contains(&normalized.as_str()) {
+                    map.insert(normalized, f.sha256.to_lowercase());
+                }
+            }
+            map
+        }
+        Err(err) => {
+            let _ = tx.send_blocking(RunnerEvent::LogLine(format!(
+                "[goley-revival-linux] Resmî sunucu manifestosu alınamadı ({}); oyun ayarları yakalaması bu oturumda atlanıyor.",
+                err
+            )));
+            std::collections::HashMap::new()
+        }
+    };
+
+    for msg in userdata::capture(prefix, &pristine) {
+        let _ = tx.send_blocking(RunnerEvent::LogLine(msg));
+    }
+
     if !launcher_exe.is_file() {
         return Err(
             "revival_launcher.exe bulunamadı. Lütfen önce 'Oyunu İndir / Güncelle' butonuna tıklayın."
@@ -197,7 +222,7 @@ fn run_session_inner(
     let (existing_game_pid, mut existing_launcher_pid) = find_running_pids();
     if let Some(gpid) = existing_game_pid {
         let _ = tx.send_blocking(RunnerEvent::GameRunning { pid: gpid });
-        monitor_until_exit(prefix, tx);
+        monitor_until_exit(prefix, &pristine, tx);
         return Ok(());
     }
 
@@ -224,6 +249,9 @@ fn run_session_inner(
         )));
         if let Ok(meta) = fs::metadata(&log_path) {
             log_offset = meta.len();
+        }
+        for msg in userdata::restore(prefix) {
+            let _ = tx.send_blocking(RunnerEvent::LogLine(msg));
         }
         if let Some(ref c) = creds {
             let _ = tx.send_blocking(RunnerEvent::Status {
@@ -310,6 +338,7 @@ fn run_session_inner(
     // 3. Tail launcher.log and drive the headless bridge state machine
     let start_wait = Instant::now();
     let mut phase_ready = existing_launcher_pid.is_some();
+    let mut restored_settings = existing_launcher_pid.is_some();
     let mut ready_since: Option<Instant> = if existing_launcher_pid.is_some() {
         Some(Instant::now())
     } else {
@@ -344,7 +373,7 @@ fn run_session_inner(
                 gpid
             )));
             let _ = tx.send_blocking(RunnerEvent::GameRunning { pid: gpid });
-            monitor_until_exit(prefix, tx);
+            monitor_until_exit(prefix, &pristine, tx);
             return Ok(());
         }
 
@@ -419,6 +448,12 @@ fn run_session_inner(
                             watch.phase = "başlatıcının hazır olması";
                             phase_ready = true;
                             ready_since = Some(Instant::now());
+                            if !restored_settings {
+                                restored_settings = true;
+                                for msg in userdata::restore(prefix) {
+                                    let _ = tx.send_blocking(RunnerEvent::LogLine(msg));
+                                }
+                            }
                         } else if let Some(idx) = trimmed.find("AuthClient: login failed ->") {
                             let reason = trimmed[idx + "AuthClient: login failed ->".len()..]
                                 .trim()
@@ -441,6 +476,12 @@ fn run_session_inner(
                                 pulsing: true,
                             });
                             std::thread::sleep(Duration::from_millis(350));
+                            if !restored_settings {
+                                restored_settings = true;
+                                for msg in userdata::restore(prefix) {
+                                    let _ = tx.send_blocking(RunnerEvent::LogLine(msg));
+                                }
+                            }
                             send_bridge_command(prefix, "PLAY\n")?;
                             watch.phase = "OYNA komutuna yanıt";
                             play_sent_at = Some(Instant::now());
@@ -507,6 +548,12 @@ fn run_session_inner(
                             detail: format!("{} doğrulanıyor", c.username),
                             pulsing: true,
                         });
+                        if !restored_settings {
+                            restored_settings = true;
+                            for msg in userdata::restore(prefix) {
+                                let _ = tx.send_blocking(RunnerEvent::LogLine(msg));
+                            }
+                        }
                         send_bridge_command(
                             prefix,
                             &format!("LOGIN\t{}\t{}\n", c.username, c.password),
@@ -522,6 +569,12 @@ fn run_session_inner(
                     detail: "Gizli köprü üzerinden OYNA komutu gönderildi".to_string(),
                     pulsing: true,
                 });
+                if !restored_settings {
+                    restored_settings = true;
+                    for msg in userdata::restore(prefix) {
+                        let _ = tx.send_blocking(RunnerEvent::LogLine(msg));
+                    }
+                }
                 send_bridge_command(prefix, "PLAY\n")?;
                 watch.phase = "OYNA komutuna yanıt";
                 play_sent_at = Some(Instant::now());
@@ -538,19 +591,30 @@ fn run_session_inner(
     }
 }
 
-fn monitor_until_exit(prefix: &Path, tx: &Sender<RunnerEvent>) {
+fn monitor_until_exit(
+    prefix: &Path,
+    pristine: &std::collections::HashMap<String, String>,
+    tx: &Sender<RunnerEvent>,
+) {
     loop {
         std::thread::sleep(Duration::from_millis(1500));
         let (game_pid, _) = find_running_pids();
         if game_pid.is_none() {
             // Game closed -> cleanly close hidden revival_launcher.exe too
             let _ = send_bridge_command(prefix, "QUIT\n");
+            for msg in userdata::capture(prefix, pristine) {
+                let _ = tx.send_blocking(RunnerEvent::LogLine(msg));
+            }
             let _ = tx.send_blocking(RunnerEvent::LogLine(
                 "[goley-revival-linux] Oyun kapandı, arka plan başlatıcısı sonlandırıldı."
                     .to_string(),
             ));
             let _ = tx.send_blocking(RunnerEvent::GameExited);
             break;
+        } else {
+            for msg in userdata::capture(prefix, pristine) {
+                let _ = tx.send_blocking(RunnerEvent::LogLine(msg));
+            }
         }
     }
 }
